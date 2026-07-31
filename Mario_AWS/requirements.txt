@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# MarioOps runtime dependencies.
+#
+# torch is NOT listed: the Docker base image
+# (pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime) already ships it with
+# CUDA support. For a local virtualenv, install it separately first:
+#     pip install torch==2.3.1
+# ---------------------------------------------------------------------------
+
+# HARD PIN -- nes-py is incompatible with numpy 2.x (confirmed in real
+# training runs). Listed first so no other package can drag in numpy 2.
+numpy==1.26.4
+
+# 4-tuple step API (obs, reward, done, info) that SkipFrame and the
+# training loops are written for. gym >= 0.26 breaks the wrappers.
+# gym.vector (AsyncVectorEnv) also comes from here -- with the RNG
+# patch in mario_agent/vector_env.py applied at construction time.
+gym==0.25.2
+gym-super-mario-bros==7.4.0
+nes-py==8.2.1
+
+# headless build: no libGL / X11 needed inside the container.
+# Used by gym's ResizeObservation and play.py's annotation/encoding.
+opencv-python-headless==4.9.0.80
+
+# RAM watchdog in train.py: checkpoint + clean stop BEFORE the OS
+# OOM-killer takes the process (which leaves no Python exception and
+# no final checkpoint). Also powers the worker-memory (USS) report.
+psutil==5.9.*
+
+# S3 checkpoint sync + CloudWatch metrics. Imported lazily and fully
+# inert when MARIOOPS_S3_BUCKET is unset, but baked into the image so
+# the same image works locally and on AWS Batch.
+boto3==1.34.*
