@@ -1,0 +1,98 @@
+{
+  // -------------------------------------------------------------------
+  // MarioOps development container (GitHub Codespaces / VS Code).
+  //
+  // Open the repo in a Codespace and this file builds Dockerfile.develop,
+  // installs the Docker + AWS CLIs, and runs the smoke test -- after
+  // which `python train.py` works with no further setup. See README.md.
+  //
+  // The production image (Dockerfile.deploy, CUDA, ~8 GB) is untouched
+  // by any of this. Nothing here ships to ECR.
+  // -------------------------------------------------------------------
+  "name": "marioops-dev",
+
+  "build": {
+    // Context is the repo root, not .devcontainer/, because the build
+    // needs requirements.txt -- the single file the dev and deploy
+    // images share.
+    "context": "..",
+    "dockerfile": "../Dockerfile.develop"
+  },
+
+  "features": {
+    // docker-in-docker: lets you build and run the REAL production
+    // image from inside the Codespace --
+    //   docker build -f Dockerfile.deploy -t marioops .
+    // It runs CPU-only here (no GPU to pass through), which is still a
+    // genuine check that the deploy image builds and boots before you
+    // push it to ECR and wait on a Batch job to find out.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+
+    // aws-cli: inspect the bucket without a local install --
+    //   aws s3 ls s3://YOUR-BUCKET/marioops/ --recursive
+    // Credentials are NOT baked in. Use `aws configure` (or a Codespace
+    // secret) if you want S3 access; leave it alone and the cloud layer
+    // stays inert.
+    "ghcr.io/devcontainers/features/aws-cli:1": {}
+  },
+
+  // 4 cores is the smallest machine where N_ENVS=2 plus the learner is
+  // a meaningful test rather than a queueing artifact; 16 GB leaves
+  // room for a real REPLAY_CAPACITY if you want to profile memory.
+  // Codespaces will offer larger; it will not offer smaller than this.
+  //
+  // COST NOTE: bigger machines burn your Codespaces quota proportionally
+  // faster. Drop to 2 cores / 8 GB if you are only reading code -- the
+  // smoke test still passes, just slower.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+
+  // Runs ONCE, after the container is created. Roughly 60-90 s: it
+  // builds a real NES env, launches two AsyncVectorEnv workers, and
+  // round-trips a checkpoint. If this fails, the environment is broken
+  // and you want to know now, not after `python train.py` has run for
+  // an hour on black frames.
+  "postCreateCommand": "python tools/smoke_test.py",
+
+  // Runs on every start/resume, including waking a stopped Codespace.
+  // Cheap (a couple of seconds) -- just re-checks the pins and imports,
+  // which is where a stale prebuild or a hand-run `pip install` shows up.
+  "postStartCommand": "python tools/smoke_test.py verify",
+
+  "remoteUser": "vscode",
+
+  // MARIOOPS_S3_BUCKET is deliberately NOT set. Unset means the whole
+  // cloud layer (S3 + CloudWatch) is inert, so a fresh Codespace trains
+  // with zero AWS credentials and zero AWS spend. Set it in the terminal
+  // when you actually want sync:
+  //   export MARIOOPS_S3_BUCKET=my-bucket MARIOOPS_RUN_ID=my-run
+  "remoteEnv": {
+    "PYTHONUNBUFFERED": "1"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        // Dependencies live in the image's system site-packages, not a
+        // workspace .venv (a .venv would be hidden by the bind mount --
+        // see Dockerfile.develop). Point Pylance at the interpreter that
+        // actually has gym and torch, or every import goes red.
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.smoke": true
+        }
+      }
+    }
+  }
+}
