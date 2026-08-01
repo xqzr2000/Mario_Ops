@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------------------
+# Keep the build context tiny. The runtime surface is exactly:
+#   config.py  train.py  play.py  mario_agent/  cloud/  requirements.txt
+# Everything else is noise -- and some of it (checkpoints, clips) can be
+# GBs that would be shipped to the Docker daemon on every build.
+#
+# Applies to BOTH images. Dockerfile.develop needs only requirements.txt
+# from the context (the repo itself is bind-mounted at runtime), so
+# nothing here can starve it.
+# ---------------------------------------------------------------------------
+
+# VCS / CI / editor
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Dev-environment definition. The Codespace setup has no business inside
+# the production image; Dockerfile.deploy COPYs explicit paths anyway,
+# so this is defence in depth.
+.devcontainer/
+tools/
+.smoke/
+
+# Python cruft
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Notebooks & docs (documentation, not runtime)
+*.ipynb
+.ipynb_checkpoints*/
+README.md
+*.md
+
+# Training artifacts -- multi-GB; must never enter the build context.
+# The image starts empty and pulls its resume state from S3.
+checkpoints*/
+logs/
+runs/
+*.chkpt
+*.mp4
+*.png
+
+# Infra, scripts, and tests run OUTSIDE the container
+infra/
+tests/
+*.sh
+
+# Docker's own files (not needed inside the image)
+Dockerfile*
+.dockerignore
