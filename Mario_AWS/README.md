@@ -7,9 +7,7 @@ entirely by environment variables.
 
 **Parallel build.** Training runs `N_ENVS` NES emulators in separate
 worker processes and overlaps CPU emulation with GPU learning
-(`step_async` -> learn -> `step_wait`). The policy, network, and
-checkpoint format match the Colab notebook exactly -- checkpoints move
-between Google Drive and S3 with zero renaming.
+(`step_async` -> learn -> `step_wait`). 
 
 ---
 
