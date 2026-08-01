@@ -314,8 +314,8 @@ on the bucket; leave the ACL ones on.)
 
 ```text
 Mario_Ops/
-├── .devcontainer/
-│   └── devcontainer.json
+├─ .devcontainer/
+│   └─ devcontainer.json
 ├─ Mario_AWS/
 ├─ Mario_Colab/
 └─ Mario_CoreWave/
