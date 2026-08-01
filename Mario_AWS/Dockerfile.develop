@@ -1,0 +1,121 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# MarioOps DEVELOPMENT image -- GitHub Codespaces / VS Code Dev Containers.
+#
+# Built automatically by .devcontainer/devcontainer.json. You should
+# never need to build or run this by hand; if you want to, it is:
+#
+#   docker build -f Dockerfile.develop -t marioops-dev .
+#
+# WHAT THIS IS NOT: the production artifact. Dockerfile.deploy bakes in
+# CUDA 12.1 and is ~8 GB -- fine for a g4dn, absurd for a Codespace that
+# has no GPU. This image installs the CPU torch wheel (~200 MB instead of
+# ~2.5 GB of nvidia libs) and is ~1.5 GB, so a Codespace starts in
+# seconds off a prebuild instead of pulling CUDA it cannot use.
+#
+# THE ONE THING THE TWO IMAGES SHARE IS requirements.txt -- the same
+# pins, compiled the same way. That is what makes "it ran in the
+# Codespace" evidence about the deploy image and not just about a
+# laptop. The differences are deliberate and listed here:
+#
+#   deploy                          develop
+#   ------                          -------
+#   CUDA base, torch from base      CPU torch wheel from download.pytorch.org
+#   Python 3.10 (conda)             Python 3.10 (Debian)
+#   build-essential purged          build-essential KEPT (you will pip again)
+#   COPYs the source                source is BIND-MOUNTED by the devcontainer
+#   runs as `mario`                 runs as `vscode` (owns the workspace)
+#   CMD python train.py             no CMD; the container idles for the editor
+#
+# INTERPRETER: 3.10, matching the deploy base (which ships conda Python
+# 3.10) -- and the Colab runs before it. 3.11 also works, and every pin
+# in requirements.txt has cp311 wheels, so this is parity rather than
+# necessity. But the whole point of developing in a container is that
+# "it worked in the Codespace" is evidence about production, and that
+# claim is cheaper to defend when the minor version is not a variable.
+#
+# The ceiling is real regardless: nes-py 8.2.1 compiles a C++ extension
+# whose setup.py needs distutils, removed in 3.12, and gym 0.25.2
+# predates 3.12 entirely. 3.10 and 3.11 work; 3.12+ does not.
+#
+# Note that parity here is PARTIAL and cannot be otherwise: this is
+# Debian Python with a pip CPU torch wheel, deploy is conda Python with
+# torch from the CUDA base -- different BLAS, different OpenSSL,
+# different build. Matching the minor version closes the gap that is
+# cheap to close, not all of it.
+#
+# EOL WATCH: Python 3.10 loses security support in October 2026. When
+# you move, move BOTH images together (deploy's base tag would become a
+# 3.11 pytorch image) rather than letting them drift apart.
+# ---------------------------------------------------------------------------
+FROM mcr.microsoft.com/devcontainers/python:3.10-bookworm
+
+# build-essential: nes-py 8.2.1 compiles a C++ extension at install
+#   time -- there is no wheel. UNLIKE the deploy image this is kept, not
+#   purged: in a dev container you will pip install something else
+#   eventually, and hitting "error: command 'gcc' failed" a week later
+#   is a bad afternoon.
+# ffmpeg:          play.py's H.264/yuv420p encode path. Without it clips
+#   fall back to OpenCV mp4v and will NOT play in a browser or the S3
+#   preview, which looks like a broken model rather than a missing codec.
+# python3-dev:     Python.h for that same extension build. This base is
+#   Debian-with-a-real-python3.10, not conda, so unlike the deploy image
+#   the Debian headers ARE the ones pip compiles against.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      python3-dev \
+      ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# CPU torch first, and PINNED TO THE SAME 2.3.1 the deploy base ships.
+# A separate index URL is the only way to get the CPU build; plain
+# `pip install torch` pulls the CUDA wheel plus ~2.5 GB of nvidia-*
+# packages that a Codespace can never use.
+RUN pip install --no-cache-dir \
+      torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+
+# Dependencies are installed INTO THE IMAGE, not into a .venv in the
+# workspace. This is the devcontainer-specific bit and it matters: the
+# repo is bind-mounted over /workspaces/<repo> at container start, so
+# anything the build wrote inside the workspace path is hidden by the
+# mount. Image-level site-packages survive; a workspace .venv would not.
+#
+# Consequence: editing requirements.txt needs a container REBUILD
+# (Command Palette -> "Dev Containers: Rebuild Container"), not just a
+# terminal command. `pip install -r requirements.txt` in the terminal
+# works too, it just does not persist to the next Codespace.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && rm /tmp/requirements.txt
+
+# Fail the BUILD, not a training run three hours in, if anything above
+# dragged in numpy 2.x. nes-py is incompatible with it and dies either
+# at import or silently mid-run; requirements.txt lists the pin first
+# for exactly this reason, and this is the belt to that suspenders.
+RUN python -c "import numpy, sys; \
+v = numpy.__version__; \
+sys.exit(0) if v == '1.26.4' else \
+(print(f'FATAL: numpy {v} installed, 1.26.4 required (nes-py breaks on 2.x)') \
+ or sys.exit(1))"
+
+# NO `COPY . .` HERE, ON PURPOSE. The devcontainer bind-mounts the repo
+# at runtime; baking a copy in would shadow nothing and just guarantee
+# stale source in the layer cache.
+
+# MARIOOPS_DEVICE=cpu, not auto: a Codespace has no GPU, and being
+# explicit means a "device: cuda" line in the logs is unambiguously a
+# bug rather than a surprise. Override per-command if you ever attach
+# a GPU machine type.
+#
+# PYTHONUNBUFFERED: train.py's [rate] and [eval] lines appear in the
+# terminal as they happen, not in bursts when the pipe flushes.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MARIOOPS_DEVICE=cpu \
+    MARIOOPS_RUN_ID=codespace-dev
+
+# No CMD/ENTRYPOINT: the devcontainer keeps the container alive for the
+# editor and you run train.py from the terminal. The deploy image is
+# the one with an entrypoint, because it has a job to do unattended.
