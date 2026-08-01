@@ -1,4 +1,4 @@
-# MarioOps
+# Mario_AWS
 
 A containerized, cloud-native MLOps pipeline that trains a Double DQN
 agent to play Super Mario Bros (World 1-1). Two images, one codebase:
