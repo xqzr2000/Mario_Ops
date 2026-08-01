@@ -1,6 +1,6 @@
 # Mario_Ops
 
-*Architecture by Tom, implementation accelerated with Vibe Coding.*
+*Architecture by Russell, implementation accelerated with Vibe Coding.*
 
 A containerized, cloud-native MLOps pipeline that trains a Double DQN agent to play **Super Mario Bros.**.
 
