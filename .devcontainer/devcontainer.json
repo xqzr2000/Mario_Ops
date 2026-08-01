@@ -1,0 +1,112 @@
+{
+  // -------------------------------------------------------------------
+  // MarioOps development container (GitHub Codespaces / VS Code).
+  //
+  // LOCATION MATTERS: this file must live at the REPOSITORY ROOT, i.e.
+  //     Mario_Ops/.devcontainer/devcontainer.json
+  // NOT inside Mario_AWS/. Codespaces only looks for
+  // .devcontainer/devcontainer.json, .devcontainer.json, or
+  // .devcontainer/<name>/devcontainer.json relative to the repo root;
+  // a copy nested in a project subfolder is silently ignored and you
+  // get the default universal image instead (Python without numpy).
+  //
+  // The project lives one level down in Mario_AWS/, so every path below
+  // is relative to THIS file's directory.
+  //
+  // The production image (Dockerfile.deploy, CUDA, ~8 GB) is untouched
+  // by any of this. Nothing here ships to ECR.
+  // -------------------------------------------------------------------
+  "name": "marioops-dev",
+
+  "build": {
+    // Context is Mario_AWS/, NOT the repo root, so that
+    // `COPY requirements.txt` inside Dockerfile.develop resolves
+    // without a Mario_AWS/ prefix -- the dev and deploy images then
+    // read the same path for the same file.
+    "context": "../Mario_AWS",
+    "dockerfile": "../Mario_AWS/Dockerfile.develop"
+  },
+
+  // Open terminals and the file tree INSIDE the project, so
+  // `python train.py` works with no `cd`. Codespaces clones the repo to
+  // /workspaces/<repo-name>; rename the repo and this must change too.
+  "workspaceFolder": "/workspaces/Mario_Ops/Mario_AWS",
+
+  "features": {
+    // docker-in-docker: lets you build and run the REAL production
+    // image from inside the Codespace --
+    //   docker build -f Dockerfile.deploy -t marioops .
+    // It runs CPU-only here (no GPU to pass through), which is still a
+    // genuine check that the deploy image builds and boots before you
+    // push it to ECR and wait on a Batch job to find out.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+
+    // aws-cli: inspect the bucket without a local install --
+    //   aws s3 ls s3://YOUR-BUCKET/marioops/ --recursive
+    // Credentials are NOT baked in. Use `aws configure` (or a Codespace
+    // secret) if you want S3 access; leave it alone and the cloud layer
+    // stays inert.
+    "ghcr.io/devcontainers/features/aws-cli:1": {}
+  },
+
+  // 4 cores is the smallest machine where N_ENVS=2 plus the learner is
+  // a meaningful test rather than a queueing artifact; 16 GB leaves
+  // room for a real REPLAY_CAPACITY if you want to profile memory.
+  // Codespaces will offer larger; it will not offer smaller than this.
+  //
+  // COST NOTE: bigger machines burn your Codespaces quota proportionally
+  // faster. Drop to 2 cores / 8 GB if you are only reading code -- the
+  // smoke test still passes, just slower.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+
+  // Runs ONCE, after the container is created, from workspaceFolder.
+  // Roughly 60-90 s: it
+  // builds a real NES env, launches two AsyncVectorEnv workers, and
+  // round-trips a checkpoint. If this fails, the environment is broken
+  // and you want to know now, not after `python train.py` has run for
+  // an hour on black frames.
+  "postCreateCommand": "python tools/smoke_test.py",
+
+  // Runs on every start/resume, including waking a stopped Codespace.
+  // Cheap (a couple of seconds) -- just re-checks the pins and imports,
+  // which is where a stale prebuild or a hand-run `pip install` shows up.
+  "postStartCommand": "python tools/smoke_test.py verify",
+
+  "remoteUser": "vscode",
+
+  // MARIOOPS_S3_BUCKET is deliberately NOT set. Unset means the whole
+  // cloud layer (S3 + CloudWatch) is inert, so a fresh Codespace trains
+  // with zero AWS credentials and zero AWS spend. Set it in the terminal
+  // when you actually want sync:
+  //   export MARIOOPS_S3_BUCKET=my-bucket MARIOOPS_RUN_ID=my-run
+  "remoteEnv": {
+    "PYTHONUNBUFFERED": "1"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        // Dependencies live in the image's system site-packages, not a
+        // workspace .venv (a .venv would be hidden by the bind mount --
+        // see Dockerfile.develop). Point Pylance at the interpreter that
+        // actually has gym and torch, or every import goes red.
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/.smoke": true
+        }
+      }
+    }
+  }
+}
