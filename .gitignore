@@ -1,0 +1,19 @@
+# Credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+
+# Mario training artifacts
+Mario_AWS/checkpoints*/
+Mario_AWS/logs/
+Mario_AWS/runs/
+
+# Local system files
+.DS_Store
