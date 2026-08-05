@@ -46,6 +46,9 @@
     // Credentials are NOT baked in. Use `aws configure` (or a Codespace
     // secret) if you want S3 access; leave it alone and the cloud layer
     // stays inert.
+    //
+    // NOTE: this feature does NOT include session-manager-plugin, which
+    // `aws ssm start-session` requires. See postCreateCommand below.
     "ghcr.io/devcontainers/features/aws-cli:1": {}
   },
 
@@ -64,16 +67,34 @@
   },
 
   // Runs ONCE, after the container is created, from workspaceFolder.
-  // Roughly 60-90 s: it
-  // builds a real NES env, launches two AsyncVectorEnv workers, and
-  // round-trips a checkpoint. If this fails, the environment is broken
-  // and you want to know now, not after `python train.py` has run for
-  // an hour on black frames.
-  "postCreateCommand": "python tools/smoke_test.py",
+  //
+  // STEP 1 -- session-manager-plugin.
+  // The aws-cli feature above does not bundle it, and it is needed by
+  // exactly one command: `aws ssm start-session`. That means the failure
+  // surfaces at the worst possible moment -- after an EC2 instance has
+  // already been launched and is billing, with no way to reach it.
+  // Installing it here means a fresh Codespace can drive EC2 end to end
+  // out of the box. The ubuntu_64bit .deb installs correctly on the
+  // python:3.10-bookworm base; "ubuntu" is just AWS's file naming.
+  //
+  // Deliberately NON-FATAL: the `|| echo` swallows a failure so a
+  // transient network error does not masquerade as a broken Python
+  // environment, and the `;` (not `&&`) guarantees the smoke test runs
+  // regardless.
+  //
+  // STEP 2 -- smoke test, roughly 60-90 s. Builds a real NES env,
+  // launches two AsyncVectorEnv workers, and round-trips a checkpoint.
+  // If this fails, the environment is broken and you want to know now,
+  // not after `python train.py` has run for an hour on black frames.
+  "postCreateCommand": "sudo bash -c 'curl -sSL -o /tmp/sm.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb && dpkg -i /tmp/sm.deb && rm -f /tmp/sm.deb' || echo '[devcontainer] session-manager-plugin install failed (non-fatal; run it by hand before aws ssm start-session)'; python tools/smoke_test.py",
 
   // Runs on every start/resume, including waking a stopped Codespace.
   // Cheap (a couple of seconds) -- just re-checks the pins and imports,
   // which is where a stale prebuild or a hand-run `pip install` shows up.
+  //
+  // session-manager-plugin is NOT reinstalled here: it survives a
+  // stop/start because it lives in the container filesystem. Only a
+  // rebuild or a brand-new Codespace re-triggers postCreateCommand.
   "postStartCommand": "python tools/smoke_test.py verify",
 
   "remoteUser": "vscode",
@@ -83,6 +104,12 @@
   // with zero AWS credentials and zero AWS spend. Set it in the terminal
   // when you actually want sync:
   //   export MARIOOPS_S3_BUCKET=my-bucket MARIOOPS_RUN_ID=my-run
+  //
+  // AWS_DEFAULT_REGION is likewise not set here. Prefer Codespaces
+  // secrets (Settings > Codespaces) for AWS_ACCESS_KEY_ID,
+  // AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION -- they arrive as env
+  // vars the CLI reads automatically, with nothing written to disk and
+  // nothing to commit by accident.
   "remoteEnv": {
     "PYTHONUNBUFFERED": "1"
   },
