@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------------
+# Destination: Mario_Ops/.gitignore   (repository ROOT)
+# ---------------------------------------------------------------------------
+
 # Credentials and secrets
 .env
 .env.*
@@ -5,15 +9,56 @@
 *.pem
 *.key
 .aws/
+credentials
 
 # Python
 **/__pycache__/
 **/*.py[cod]
+.venv/
+venv/
+.pytest_cache/
 
-# Mario training artifacts
-Mario_AWS/checkpoints*/
-Mario_AWS/logs/
-Mario_AWS/runs/
+# Notebooks.
+# NOTE: the authoring notebook is this project's source of truth (every
+# file is a markdown header + fenced code cell, then re-exported), so it
+# is explicitly re-included below. Ignoring it outright would leave the
+# real authoring history untracked and living only on one local disk.
+# Delete the "!" line if you would rather keep it out of git entirely --
+# but then back it up somewhere, because it cannot be regenerated from
+# the exported files.
+*.ipynb
+!mario_aws_para4.ipynb
+.ipynb_checkpoints/
+
+# Media and archives.
+# Large, regenerable, and permanent once committed: git history is
+# immutable, so a stray 200 MB gameplay clip is 200 MB in every clone
+# forever, even after a later `git rm`.
+*.mp4
+*.avi
+*.mov
+*.gif
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# Training artifacts.
+# Deliberately UNANCHORED (no leading path component) so these apply
+# inside Mario_AWS/, Mario_Colab/, and Mario_CoreWave/ alike. The
+# previous "Mario_AWS/checkpoints*/" form contained a slash, which pins
+# a pattern to the repo root, and so silently missed the other two
+# project folders.
+checkpoints*/
+logs/
+runs/
+*.chkpt
+*.pt
+*.pth
+
+# Smoke-test scratch dir (mirrors the files.exclude entry in devcontainer.json)
+.smoke/
 
 # Local system files
 .DS_Store
