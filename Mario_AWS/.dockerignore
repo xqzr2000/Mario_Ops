@@ -1,4 +1,6 @@
 # ---------------------------------------------------------------------------
+# Destination: Mario_Ops/Mario_AWS/.dockerignore
+#
 # Keep the build context tiny. The runtime surface is exactly:
 #   config.py  train.py  play.py  mario_agent/  cloud/  requirements.txt
 # Everything else is noise -- and some of it (checkpoints, clips) can be
@@ -45,6 +47,29 @@ runs/
 *.chkpt
 *.mp4
 *.png
+
+# Additional media and archives -- same reasoning as the entries above.
+*.avi
+*.mov
+*.gif
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# Secrets.
+# Dockerfile.deploy COPYs explicit paths, so nothing here can be picked
+# up accidentally today. This is insurance against a future broad
+# `COPY . .`: a credential baked into an image layer and pushed to ECR
+# is not retractable -- deleting the file in a later layer does not
+# remove it from the earlier one.
+.env
+.env.*
+*.pem
+*.key
+.aws/
+credentials
 
 # Infra, scripts, and tests run OUTSIDE the container
 infra/
