@@ -1,5 +1,7 @@
 # Mario_Colab
 
+https://github.com/user-attachments/assets/a138d76e-3090-42cc-b34b-74d2c89e1114
+
 **Train a Double DQN agent to play Mario on Google Colab's free T4GPU**
 
 This folder is the **notebook lineage** of Mario_Ops: a single self-contained Colab notebook that trains a memory-augmented Double DQN agent on `SuperMarioBros-1-1`, checkpoints to Google Drive so seperate sessions can be chained together, and records the resulting gameplay as an `.mp4`.
