@@ -56,7 +56,7 @@ OPENAI_API_STYLE = os.environ.get("OPENAI_API_STYLE", "responses")
 # Set to "" to omit the parameter entirely for models that reject it.
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "low")
 
-OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 400))
+OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 2000))
 
 # Retries on a transient API error (429/5xx/timeout). The emulator is
 # frozen while we retry, so a retry costs wall-clock time but no game
