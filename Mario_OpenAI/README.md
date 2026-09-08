@@ -38,10 +38,10 @@ https://github.com/user-attachments/assets/625fc5e1-e8ac-4326-933e-b3b53b0b1cb8
 
 GPT-6-Astra
 
-https://github.com/user-attachments/assets/1c29cef7-6218-445a-baaf-e754cbf85dcd
-
 https://github.com/user-attachments/assets/2f3948de-bfee-4233-84bc-97b97a61d8dc
 
+
+https://github.com/user-attachments/assets/1c29cef7-6218-445a-baaf-e754cbf85dcd
 
 ## Run it
 
