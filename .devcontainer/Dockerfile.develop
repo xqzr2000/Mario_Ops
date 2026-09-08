@@ -95,7 +95,59 @@ RUN apt-get update \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU torch first, and PINNED TO THE SAME 2.3.1 the deploy base ships.
+# ---------------------------------------------------------------------------
+# TOOLCHAIN FIRST. Both lines below exist because of one real build
+# failure, and removing either one re-arms it.
+#
+# WHAT BROKE (2026-09-08): the torch install two steps down died with
+#
+#   ERROR: Could not find a version that satisfies the requirement
+#          flit_core<4,>=3.11 (from versions: none)
+#
+# which names a package nothing here asks for. The actual chain:
+#
+#   1. typing_extensions 4.16.0 ships a wheel whose metadata Name field
+#      uses an underscore. torch's requirement string uses a hyphen.
+#   2. The pip in this base image compares those two WITHOUT normalising,
+#      calls the wheel inconsistent, and discards it. The log line is
+#      "has inconsistent Name: expected 'typing-extensions', but metadata
+#      has 'typing_extensions'".
+#   3. With no acceptable wheel, pip falls back to the source dist.
+#   4. Building that sdist needs flit_core as its PEP 517 backend.
+#   5. --index-url on the torch line REPLACES PyPI rather than adding to
+#      it, and download.pytorch.org does not carry flit_core. Dead end.
+#
+# Jinja2 hit the identical normalisation bug in the same build and
+# survived only because an older Jinja2 wheel was still present on the
+# PyTorch index to fall back to. typing-extensions had no such luck.
+#
+# Nothing in this repo changed to cause it. An upstream upload broke an
+# old pip, which is exactly the drift the pins below are meant to stop --
+# arriving through a transitive dependency nobody pins.
+# ---------------------------------------------------------------------------
+
+# FIX 1 -- a pip new enough to normalise wheel metadata names per PEP 503
+# before comparing them. Must come before ANY package install.
+RUN pip install --no-cache-dir --upgrade \
+        "pip>=24.0" setuptools wheel
+
+# FIX 2 -- pin torch's one problematic pure-Python dependency FROM PyPI,
+# while PyPI is still the active index. Belt to the suspenders above: once
+# this is satisfied, the torch line below never resolves it against
+# download.pytorch.org at all, so a future pip regressing the same way
+# cannot reach step 3. torch 2.3.1 needs >=4.8.0; 4.12.2 is inside that
+# and predates the underscore-metadata releases.
+RUN pip install --no-cache-dir "typing-extensions==4.12.2"
+
+# DO NOT "fix" the above with --extra-index-url https://pypi.org/simple on
+# the torch line. It works today and is the obvious move, but it makes
+# BOTH indexes candidates for every package including torch itself. PyPI
+# carries a CUDA torch==2.3.1; the PyTorch index carries 2.3.1+cpu. Local
+# version suffixes sort higher so you would probably still get the CPU
+# build -- and "probably" is doing far too much work for something that
+# silently pulls 2.5 GB of nvidia wheels into a Codespace when it loses.
+
+# CPU torch, and PINNED TO THE SAME 2.3.1 the deploy base ships.
 # A separate index URL is the only way to get the CPU build; plain
 # `pip install torch` pulls the CUDA wheel plus ~2.5 GB of nvidia-*
 # packages that a Codespace can never use.
@@ -152,6 +204,17 @@ RUN python -c "import numpy, sys; \
     sys.exit(0) if v == '1.26.4' else \
     (print(f'FATAL: numpy {v} installed, 1.26.4 required (nes-py breaks on 2.x)') \
      or sys.exit(1))"
+
+# Same idea for the dependency that actually broke the build. If a later
+# edit lets something upgrade typing-extensions past the pin, that is not
+# fatal on its own -- but it means FIX 2 above has stopped doing its job,
+# and you want to learn that here rather than in a build log six months
+# from now that again blames a package called flit_core.
+RUN python -c "import typing_extensions, sys; \
+    v = typing_extensions.__version__; \
+    sys.exit(0) if v == '4.12.2' else \
+    (print(f'WARNING: typing-extensions {v}, pinned 4.12.2 -- see FIX 2') \
+     or sys.exit(0))"
 
 # NO `COPY . .` HERE, ON PURPOSE. The devcontainer bind-mounts the repo
 # at runtime; baking a copy in would shadow nothing and just guarantee
