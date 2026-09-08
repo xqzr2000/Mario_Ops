@@ -142,25 +142,51 @@ MAX_FRAMES = int(os.environ.get("MAX_FRAMES", 9000))
 #
 # Left at 90 until that comparison actually says otherwise.
 #
-# THESE THREE ARE THE CENTRAL TRADE-OFF, AND 90 MAY BE TOO GENEROUS.
-# Measured 2026-09-08, 15-decision budget, gpt-5.6-sol:
+# 90 IS FINE. AN EARLIER READING OF THE DATA SAID OTHERWISE AND WAS
+# WRONG -- worth recording, because the wrong conclusion was the
+# plausible one. Measured 2026-09-08, 15-decision budget, gpt-5.6-sol:
 #
-#     cap 90:  3 calls, final_x 459, 153 px/call, budget exhausted
-#     cap 90:  2 calls, final_x 312, 156 px/call, DIED
-#     cap 45:  8 calls, final_x 706,  88 px/call, DIED
+#     cap  telemetry  calls  final_x  px/call  ended
+#     ---  ---------  -----  -------  -------  -----
+#      90  dx only        3      459      153  budget exhausted
+#      90  dx only        2      312      156  DIED
+#      90  dx only        2      312      156  DIED  (reproduced exactly)
+#      45  dx only        8      706       88  DIED
+#      90  speed          6      697      116  DIED
 #
-# Short plans got 2.3x further but are ~40% less efficient per call.
-# On the death at cap 90 the model returned an exactly-90-frame plan --
-# the clamp fired -- chaining two jumps, with the note "then LIKELY
-# first pipe". It was guessing about terrain past the screen edge. A
-# 90-frame plan is 1.5 s of blind play.
+# The first four rows say "long plans kill you, clamp them to 45": cap
+# 45 got 2.3x further, at 40% worse efficiency. That reading blamed
+# BLINDNESS -- 90 frames is 1.5 s of committing to terrain you cannot
+# see yet.
 #
-# CAVEAT: n=1 per condition and the 2-call run is barely a sample. The
-# missing experiment is long plans at a 15-decision budget:
+# It was the wrong cause. The x=312 death was DETERMINISTIC (identical
+# twice, same calls, same tokens), and the frame arithmetic gave it
+# away: the plan asked for 90 frames, the run executed 106 total across
+# two decisions, so Mario died 15 frames into a 24-frame OPENING RUN-UP.
+# There was no blind mistake and no mistimed jump -- the jump never
+# happened. The model judged the Goomba further away than it was,
+# because a still frame carries no scale for converting pixels to
+# frames.
 #
-#     MAX_DECISIONS=15 python openai_play.py
+# Fixing that is openai_agent.py's job, not this constant's: telemetry
+# now reports px/frame plus frames-to-midscreen, and the prompt carries
+# the division. Last row: same cap 90 that died twice, now reaching 697
+# -- near the clamped run's distance at 1.3x its efficiency. The clamp
+# would have constrained around a cause it never addressed.
 #
-# Left at 90 until that comparison actually says otherwise.
+# THE TRADE-OFF IS STILL REAL, just not where it first looked. Fewer
+# frames per plan means more calls per unit distance and a fresh
+# screenshot before every jump. If you revisit it, compare final_x per
+# api_call, and re-run the cap-45 condition WITH the speed telemetry --
+# that cell of the table is still empty.
+#
+# NEXT KNOWN FAULT, and it is not here either: plans routinely end
+# mid-jump (a trailing "right+B x5" after a jump segment), so the next
+# decision plans a run-up during frames Mario spends falling. Decisions
+# 005 and 006 of the last run emitted byte-identical plans from
+# different screens, then died. The fix is in openai_play.py -- step
+# until y_pos settles before taking the screenshot, with a frame cap so
+# a fall into a pit still terminates.
 MAX_SEGMENTS_PER_PLAN = int(os.environ.get("MAX_SEGMENTS_PER_PLAN", 4))
 MAX_FRAMES_PER_SEGMENT = int(os.environ.get("MAX_FRAMES_PER_SEGMENT", 60))
 MAX_FRAMES_PER_PLAN = int(os.environ.get("MAX_FRAMES_PER_PLAN", 90))
