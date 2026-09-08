@@ -1,0 +1,90 @@
+{
+    // -------------------------------------------------------------------
+    // Destination: Mario_Ops/Mario_Ops.code-workspace (repository ROOT).
+    // Paths below are relative to THIS file's directory.
+    //
+    // WHY THIS EXISTS: devcontainer.json sets
+    //   "workspaceFolder": "/workspaces/Mario_Ops/Mario_AWS"
+    // so that a fresh terminal lands in the project and `python train.py`
+    // works with no cd. The cost of that convenience is that VS Code
+    // treats Mario_AWS/ as the whole world -- Mario_OpenAI/ is cloned to
+    // disk and reachable from the terminal, but invisible in the
+    // Explorer, unreachable by Ctrl+P, and excluded from find-in-files.
+    //
+    // Opening this file (File > Open Workspace from File) switches VS
+    // Code to multi-root mode and shows both projects as top-level
+    // entries. File > Close Workspace goes back.
+    //
+    // ENTIRELY OPTIONAL. devcontainer.json is NOT changed, so if you
+    // never open this file the Codespace behaves exactly as it does
+    // today and this is an inert 30 lines sitting in the repo.
+    //
+    // DELIBERATELY NOT WIRED INTO devcontainer.json: pointing
+    // workspaceFolder at this file would open it automatically, but it
+    // would also change the default terminal directory, and
+    // postCreateCommand runs `python tools/smoke_test.py` as a relative
+    // path that depends on landing in Mario_AWS/.
+    // -------------------------------------------------------------------
+    "folders": [
+        {
+            // The DQN project. Listed first so it is the default target
+            // for anything that picks "the first folder".
+            "name": "Mario_AWS (Double DQN)",
+            "path": "Mario_AWS"
+        },
+        {
+            // The untrained vision-model comparison.
+            "name": "Mario_OpenAI (vision)",
+            "path": "Mario_OpenAI"
+        }
+    ],
+    "settings": {
+        // Pin new terminals to Mario_AWS. Without this, multi-root mode
+        // prompts "which folder?" every time you open a terminal, and
+        // `python train.py` stops being a no-cd command -- which is the
+        // one piece of existing behaviour this file could break.
+        // Change to ${workspaceFolder:Mario_OpenAI (vision)} while you
+        // are working on that project, or delete the line to get the
+        // picker back.
+        "terminal.integrated.cwd": "${workspaceFolder:Mario_AWS (Double DQN)}",
+
+        // Duplicated from devcontainer.json's
+        // customizations.vscode.settings ON PURPOSE. Dev container
+        // settings land at MACHINE scope; workspace settings sit ABOVE
+        // machine scope in VS Code's precedence chain. Omitting them
+        // here would let opening this workspace silently drop the
+        // interpreter path and send every `import gym` red -- the exact
+        // failure the devcontainer comment warns about.
+        //
+        // Dependencies live in the image's system site-packages, not a
+        // workspace .venv (a .venv would be hidden by the bind mount).
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.terminal.activateEnvironment": false,
+
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/.smoke": true
+        },
+
+        // Multi-root widens find-in-files to both projects, which is
+        // mostly what you want -- but not across gameplay artifacts.
+        // runs/ and checkpoints*/ are gitignored, so they would
+        // otherwise show up in search results as untracked noise.
+        "search.exclude": {
+            "**/runs": true,
+            "**/checkpoints*": true,
+            "**/logs": true
+        }
+    },
+    "extensions": {
+        // Same list as devcontainer.json. A multi-root workspace can
+        // carry its own recommendations, and keeping them in sync means
+        // the prompt is identical whether or not this file is open.
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.vscode-pylance",
+            "ms-azuretools.vscode-docker",
+            "ms-toolsai.jupyter"
+        ]
+    }
+}
