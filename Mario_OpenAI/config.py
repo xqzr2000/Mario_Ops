@@ -146,6 +146,8 @@ MAX_FRAMES = int(os.environ.get("MAX_FRAMES", 9000))
 # WRONG -- worth recording, because the wrong conclusion was the
 # plausible one. Measured 2026-09-08, 15-decision budget, gpt-5.6-sol:
 #
+# READ THE VARIANCE WARNING BELOW THE TABLE BEFORE TRUSTING ANY ROW.
+#
 #     cap  telemetry  calls  final_x  px/call  ended
 #     ---  ---------  -----  -------  -------  -----
 #      90  dx only        3      459      153  budget exhausted
@@ -180,13 +182,27 @@ MAX_FRAMES = int(os.environ.get("MAX_FRAMES", 9000))
 # api_call, and re-run the cap-45 condition WITH the speed telemetry --
 # that cell of the table is still empty.
 #
-# NEXT KNOWN FAULT, and it is not here either: plans routinely end
-# mid-jump (a trailing "right+B x5" after a jump segment), so the next
-# decision plans a run-up during frames Mario spends falling. Decisions
-# 005 and 006 of the last run emitted byte-identical plans from
-# different screens, then died. The fix is in openai_play.py -- step
-# until y_pos settles before taking the screenshot, with a frame cap so
-# a fall into a pit still terminates.
+# VARIANCE WARNING -- THE TABLE ABOVE IS n=1 PER ROW AND THAT IS NOT
+# ENOUGH. Two runs at IDENTICAL settings (cap 45, speed telemetry) gave
+# final_x 1128 and 703, a 60% swing. The x=312 death earlier reproduced
+# exactly, which made the whole system look deterministic; it is not.
+# One death had one reproducible cause -- that says nothing about the
+# spread of outcomes.
+#
+# So single-run comparisons cannot detect anything smaller than a few
+# hundred pixels, and the differences between several rows above are
+# inside that band. Before drawing a conclusion from a change, run the
+# condition three times:
+#
+#     for i in 1 2 3; do MAX_DECISIONS=15 python openai_play.py \
+#       2>/dev/null | grep -E "final_x|api_calls"; done
+#
+# NEXT KNOWN FAULT: plans routinely end mid-jump (a trailing
+# "right+B x5" after a jump segment), so the next decision plans a
+# run-up during frames Mario spends falling. LAND_BEFORE_DECIDING above
+# is the attempted fix and its first outing did NOT work -- see
+# LAND_STABLE_FRAMES for why the detector was too weak to fire
+# properly.
 MAX_SEGMENTS_PER_PLAN = int(os.environ.get("MAX_SEGMENTS_PER_PLAN", 4))
 MAX_FRAMES_PER_SEGMENT = int(os.environ.get("MAX_FRAMES_PER_SEGMENT", 60))
 MAX_FRAMES_PER_PLAN = int(os.environ.get("MAX_FRAMES_PER_PLAN", 90))
@@ -219,10 +235,39 @@ LAND_BEFORE_DECIDING = os.environ.get("LAND_BEFORE_DECIDING", "1") == "1"
 # far longer than any real jump (~45 frames at most).
 LAND_MAX_FRAMES = int(os.environ.get("LAND_MAX_FRAMES", 90))
 
+# How many consecutive identical y_pos readings count as "grounded".
+#
+# THIS DEFAULTED TO 3 AND 3 WAS TOO WEAK. First run with landing on:
+# 6 landings totalling 25 frames -- 4.2 frames each, barely above the
+# threshold itself -- while two decisions still opened with the note
+# "Airborne". y_pos is momentarily flat at the apex of a jump and
+# plausibly flat for a few frames mid-descent too, so a 3-frame window
+# exits while Mario is still in the air and the loop becomes an
+# expensive no-op.
+#
+# 6 frames (0.1 s) is longer than any plateau a ballistic arc produces
+# but still short against a real landing. If "Airborne" notes persist,
+# raise it and check land_y_samples in summary.json -- that is the
+# signal this threshold is guessing about.
+LAND_STABLE_FRAMES = int(os.environ.get("LAND_STABLE_FRAMES", 6))
+
+# Record the raw y_pos sequence from each landing wait into
+# summary.json. Small, off by default, and the only way to answer "does
+# y_pos actually plateau mid-air on this ROM" with data instead of
+# argument. Turn it on for one run, look, turn it off.
+LAND_DEBUG_Y = os.environ.get("LAND_DEBUG_Y", "0") == "1"
+
 # Held while waiting to land. Air control is limited but not zero, so
 # holding right+B keeps horizontal momentum through the descent instead
 # of dropping it. NOOP would land Mario short of where the model's plan
 # intended him to be.
+#
+# COUNTER-ARGUMENT, untested: during a descent the model already
+# planned, holding right extends the jump's horizontal travel PAST
+# where the model intended Mario to land -- uncontrolled forward motion
+# outside any plan. Set to 0 (NOOP) to test that; the landing frame
+# count is small enough that it probably does not matter either way,
+# but "probably" has been wrong twice today.
 LAND_HOLD_ACTION = int(os.environ.get("LAND_HOLD_ACTION", 3))   # right+B
 
 # ---------------------------------------------------------- behaviour

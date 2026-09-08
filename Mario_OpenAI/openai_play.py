@@ -102,16 +102,17 @@ def land(env, frames_rgb, meta, ctx):
     them out of prev_frames would corrupt the px/frame telemetry this
     was built to protect.
 
-    Returns (done, info, frames_used).
+    Returns (done, info, frames_used, y_samples).
     """
     info = ctx["info"]
     if not config.LAND_BEFORE_DECIDING:
-        return False, info, 0
+        return False, info, 0, []
 
     action = config.LAND_HOLD_ACTION
     start = ctx["frame"]
     last_y = int(info.get("y_pos", 0))
     still = 0
+    samples = [last_y]
 
     for _ in range(config.LAND_MAX_FRAMES):
         _, _, done, info = env.step(action)
@@ -126,19 +127,22 @@ def land(env, frames_rgb, meta, ctx):
             })
         if done or info.get("flag_get", False):
             ctx["info"] = info
-            return done, info, ctx["frame"] - start
+            return done, info, ctx["frame"] - start, samples
 
         y = int(info.get("y_pos", 0))
-        # Three consecutive identical readings, not one: y_pos is
-        # momentarily flat at the apex of a jump too, and stopping there
-        # would defeat the whole point.
+        samples.append(y)
+        # Consecutive identical readings, not one: y_pos is momentarily
+        # flat at the apex of a jump and plausibly mid-descent too, so a
+        # short window exits while Mario is still airborne. See
+        # LAND_STABLE_FRAMES -- the first default (3) was too weak and
+        # made this loop an expensive no-op.
         still = still + 1 if y == last_y else 0
         last_y = y
-        if still >= 3:
+        if still >= config.LAND_STABLE_FRAMES:
             break
 
     ctx["info"] = info
-    return False, info, ctx["frame"] - start
+    return False, info, ctx["frame"] - start, samples
 
 
 def main() -> None:
@@ -178,6 +182,7 @@ def main() -> None:
     # than they should and the prompt -- not this loop -- is the fix.
     landing_frames = 0
     landings = 0
+    land_y_samples = []
     stuck = 0
     done = False
     stop_reason = "decision budget exhausted"
@@ -238,10 +243,14 @@ def main() -> None:
         # Settle to the ground before the next screenshot, so the model
         # never plans a run-up for frames Mario spends falling.
         if not done and not info.get("flag_get", False):
-            done, info, landed_in = land(env, frames_rgb, meta, ctx)
+            done, info, landed_in, y_samples = land(env, frames_rgb,
+                                                    meta, ctx)
             if landed_in:
                 landing_frames += landed_in
                 landings += 1
+                if config.LAND_DEBUG_Y:
+                    land_y_samples.append(
+                        {"decision": decision, "y": y_samples})
 
         # Measured, not requested: run_segment breaks early on death,
         # and the landing frames above are real game time too.
@@ -311,6 +320,9 @@ def main() -> None:
         "land_before_deciding": config.LAND_BEFORE_DECIDING,
         "landings": landings,
         "landing_frames": landing_frames,
+        "land_stable_frames": config.LAND_STABLE_FRAMES,
+        "land_hold_action": config.LAND_HOLD_ACTION,
+        "land_y_samples": land_y_samples,
         "captured_frames": len(frames_rgb),
         "final_x_position": final_x,
         "flag_get": flag,
