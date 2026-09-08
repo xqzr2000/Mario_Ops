@@ -1,139 +1,177 @@
 {
-  // -------------------------------------------------------------------
-  // MarioOps development container (GitHub Codespaces / VS Code).
-  //
-  // LOCATION MATTERS: this file must live at the REPOSITORY ROOT, i.e.
-  //     Mario_Ops/.devcontainer/devcontainer.json
-  // NOT inside Mario_AWS/. Codespaces only looks for
-  // .devcontainer/devcontainer.json, .devcontainer.json, or
-  // .devcontainer/<name>/devcontainer.json relative to the repo root;
-  // a copy nested in a project subfolder is silently ignored and you
-  // get the default universal image instead (Python without numpy).
-  //
-  // The project lives one level down in Mario_AWS/, so every path below
-  // is relative to THIS file's directory.
-  //
-  // The production image (Dockerfile.deploy, CUDA, ~8 GB) is untouched
-  // by any of this. Nothing here ships to ECR.
-  // -------------------------------------------------------------------
-  "name": "marioops-dev",
-
-  "build": {
-    // Context is Mario_AWS/, NOT the repo root, so that
-    // `COPY requirements.txt` inside Dockerfile.develop resolves
-    // without a Mario_AWS/ prefix -- the dev and deploy images then
-    // read the same path for the same file.
-    "context": "../Mario_AWS",
-    "dockerfile": "../Mario_AWS/Dockerfile.develop"
-  },
-
-  // Open terminals and the file tree INSIDE the project, so
-  // `python train.py` works with no `cd`. Codespaces clones the repo to
-  // /workspaces/<repo-name>; rename the repo and this must change too.
-  "workspaceFolder": "/workspaces/Mario_Ops/Mario_AWS",
-
-  "features": {
-    // docker-in-docker: lets you build and run the REAL production
-    // image from inside the Codespace --
-    //   docker build -f Dockerfile.deploy -t marioops .
-    // It runs CPU-only here (no GPU to pass through), which is still a
-    // genuine check that the deploy image builds and boots before you
-    // push it to ECR and wait on a Batch job to find out.
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-
-    // aws-cli: inspect the bucket without a local install --
-    //   aws s3 ls s3://YOUR-BUCKET/marioops/ --recursive
-    // Credentials are NOT baked in. Use `aws configure` (or a Codespace
-    // secret) if you want S3 access; leave it alone and the cloud layer
-    // stays inert.
+    // -------------------------------------------------------------------
+    // MarioOps development container (GitHub Codespaces / VS Code).
     //
-    // NOTE: this feature does NOT include session-manager-plugin, which
-    // `aws ssm start-session` requires. See postCreateCommand below.
-    "ghcr.io/devcontainers/features/aws-cli:1": {}
-  },
+    // LOCATION MATTERS: this file must live at the REPOSITORY ROOT, i.e.
+    // Mario_Ops/.devcontainer/devcontainer.json
+    // NOT inside Mario_AWS/. Codespaces only looks for
+    // .devcontainer/devcontainer.json, .devcontainer.json, or
+    // .devcontainer/<name>/devcontainer.json relative to the repo root;
+    // a copy nested in a project subfolder is silently ignored and you
+    // get the default universal image instead (Python without numpy).
+    //
+    // The project lives one level down in Mario_AWS/, so every path below
+    // is relative to THIS file's directory.
+    //
+    // The production image (Dockerfile.deploy, CUDA, ~8 GB) is untouched
+    // by any of this. Nothing here ships to ECR.
+    // -------------------------------------------------------------------
+    "name": "marioops-dev",
 
-  // 4 cores is the smallest machine where N_ENVS=2 plus the learner is
-  // a meaningful test rather than a queueing artifact; 16 GB leaves
-  // room for a real REPLAY_CAPACITY if you want to profile memory.
-  // Codespaces will offer larger; it will not offer smaller than this.
-  //
-  // COST NOTE: bigger machines burn your Codespaces quota proportionally
-  // faster. Drop to 2 cores / 8 GB if you are only reading code -- the
-  // smoke test still passes, just slower.
-  "hostRequirements": {
-    "cpus": 4,
-    "memory": "16gb",
-    "storage": "32gb"
-  },
+    "build": {
+        // Context is Mario_AWS/, NOT the repo root and NOT this
+        // directory, so that `COPY requirements.txt` inside
+        // Dockerfile.develop resolves without a Mario_AWS/ prefix -- the
+        // dev and deploy images then read the same file. It also keeps
+        // Mario_AWS/.dockerignore in force; a root context would ignore
+        // it and ship .git, runs/ and checkpoints*/ to the daemon.
+        //
+        // The Dockerfile itself lives HERE, beside this file, because
+        // the dev image is a repo-level asset shared by every project,
+        // while Dockerfile.deploy is a Mario_AWS artifact bound for ECR.
+        // A Dockerfile does not have to sit inside its own context --
+        // this is `docker build -f`. Both paths below are relative to
+        // THIS file's directory, which is why one has a ../ and the
+        // other does not.
+        "context": "../Mario_AWS",
+        "dockerfile": "Dockerfile.develop"
+    },
 
-  // Runs ONCE, after the container is created, from workspaceFolder.
-  //
-  // STEP 1 -- session-manager-plugin.
-  // The aws-cli feature above does not bundle it, and it is needed by
-  // exactly one command: `aws ssm start-session`. That means the failure
-  // surfaces at the worst possible moment -- after an EC2 instance has
-  // already been launched and is billing, with no way to reach it.
-  // Installing it here means a fresh Codespace can drive EC2 end to end
-  // out of the box. The ubuntu_64bit .deb installs correctly on the
-  // python:3.10-bookworm base; "ubuntu" is just AWS's file naming.
-  //
-  // Deliberately NON-FATAL: the `|| echo` swallows a failure so a
-  // transient network error does not masquerade as a broken Python
-  // environment, and the `;` (not `&&`) guarantees the smoke test runs
-  // regardless.
-  //
-  // STEP 2 -- smoke test, roughly 60-90 s. Builds a real NES env,
-  // launches two AsyncVectorEnv workers, and round-trips a checkpoint.
-  // If this fails, the environment is broken and you want to know now,
-  // not after `python train.py` has run for an hour on black frames.
-  "postCreateCommand": "sudo bash -c 'curl -sSL -o /tmp/sm.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb && dpkg -i /tmp/sm.deb && rm -f /tmp/sm.deb' || echo '[devcontainer] session-manager-plugin install failed (non-fatal; run it by hand before aws ssm start-session)'; python tools/smoke_test.py",
+    // Open terminals and the file tree INSIDE the project, so
+    // `python train.py` works with no `cd`. Codespaces clones the repo to
+    // /workspaces/<repo-name>; rename the repo and this must change too.
+    //
+    // Consequence: sibling projects (Mario_OpenAI, Mario_CoreWeave) are
+    // cloned to disk and reachable with `cd ../Mario_OpenAI`, but are NOT
+    // visible in the Explorer. Open Mario_Ops.code-workspace at the repo
+    // root (File > Open Workspace from File) to see them all. That is an
+    // editor convenience only and changes nothing here.
+    "workspaceFolder": "/workspaces/Mario_Ops/Mario_AWS",
 
-  // Runs on every start/resume, including waking a stopped Codespace.
-  // Cheap (a couple of seconds) -- just re-checks the pins and imports,
-  // which is where a stale prebuild or a hand-run `pip install` shows up.
-  //
-  // session-manager-plugin is NOT reinstalled here: it survives a
-  // stop/start because it lives in the container filesystem. Only a
-  // rebuild or a brand-new Codespace re-triggers postCreateCommand.
-  "postStartCommand": "python tools/smoke_test.py verify",
+    "features": {
+        // docker-in-docker: lets you build and run the REAL production
+        // image from inside the Codespace --
+        // docker build -f Dockerfile.deploy -t marioops .
+        // It runs CPU-only here (no GPU to pass through), which is still a
+        // genuine check that the deploy image builds and boots before you
+        // push it to ECR and wait on a Batch job to find out.
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
 
-  "remoteUser": "vscode",
+        // aws-cli: inspect the bucket without a local install --
+        // aws s3 ls s3://YOUR-BUCKET/marioops/ --recursive
+        // Credentials are NOT baked in. Use `aws configure` (or a Codespace
+        // secret) if you want S3 access; leave it alone and the cloud layer
+        // stays inert.
+        //
+        // NOTE: this feature does NOT include session-manager-plugin, which
+        // `aws ssm start-session` requires. See postCreateCommand below.
+        "ghcr.io/devcontainers/features/aws-cli:1": {}
+    },
 
-  // MARIOOPS_S3_BUCKET is deliberately NOT set. Unset means the whole
-  // cloud layer (S3 + CloudWatch) is inert, so a fresh Codespace trains
-  // with zero AWS credentials and zero AWS spend. Set it in the terminal
-  // when you actually want sync:
-  //   export MARIOOPS_S3_BUCKET=my-bucket MARIOOPS_RUN_ID=my-run
-  //
-  // AWS_DEFAULT_REGION is likewise not set here. Prefer Codespaces
-  // secrets (Settings > Codespaces) for AWS_ACCESS_KEY_ID,
-  // AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION -- they arrive as env
-  // vars the CLI reads automatically, with nothing written to disk and
-  // nothing to commit by accident.
-  "remoteEnv": {
-    "PYTHONUNBUFFERED": "1"
-  },
-
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "ms-azuretools.vscode-docker",
-        "ms-toolsai.jupyter"
-      ],
-      "settings": {
-        // Dependencies live in the image's system site-packages, not a
-        // workspace .venv (a .venv would be hidden by the bind mount --
-        // see Dockerfile.develop). Point Pylance at the interpreter that
-        // actually has gym and torch, or every import goes red.
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "python.terminal.activateEnvironment": false,
-        "files.exclude": {
-          "**/__pycache__": true,
-          "**/.smoke": true
+    // Recommended secrets. This puts NO value in git -- it only declares
+    // that the project expects these variables, so Codespaces shows the
+    // prompt at creation time instead of the first run failing with a
+    // confusing error. Set actual values at
+    // Settings > Codespaces > repository secrets; they arrive as
+    // environment variables with nothing written to disk.
+    //
+    // OPENAI_MODEL is deliberately NOT here. It is not sensitive, and a
+    // model id buried in repo settings makes a run unreproducible from
+    // the repo alone. It defaults in Mario_OpenAI/config.py, is
+    // overridable per run, and is recorded in every summary.json.
+    "secrets": {
+        "OPENAI_API_KEY": {
+            "description": "OpenAI API key used by Mario_OpenAI. Not needed for train.py or play.py -- leave it unset and that project simply exits with a clear message."
         }
-      }
+    },
+
+    // 4 cores is the smallest machine where N_ENVS=2 plus the learner is
+    // a meaningful test rather than a queueing artifact; 16 GB leaves
+    // room for a real REPLAY_CAPACITY if you want to profile memory.
+    // Codespaces will offer larger; it will not offer smaller than this.
+    //
+    // COST NOTE: bigger machines burn your Codespaces quota proportionally
+    // faster. Drop to 2 cores / 8 GB if you are only reading code -- the
+    // smoke test still passes, just slower.
+    "hostRequirements": {
+        "cpus": 4,
+        "memory": "16gb",
+        "storage": "32gb"
+    },
+
+    // Runs ONCE, after the container is created, from workspaceFolder.
+    //
+    // STEP 1 -- session-manager-plugin.
+    // The aws-cli feature above does not bundle it, and it is needed by
+    // exactly one command: `aws ssm start-session`. That means the failure
+    // surfaces at the worst possible moment -- after an EC2 instance has
+    // already been launched and is billing, with no way to reach it.
+    // Installing it here means a fresh Codespace can drive EC2 end to end
+    // out of the box. The ubuntu_64bit .deb installs correctly on the
+    // python:3.10-bookworm base; "ubuntu" is just AWS's file naming.
+    //
+    // Deliberately NON-FATAL: the `|| echo` swallows a failure so a
+    // transient network error does not masquerade as a broken Python
+    // environment, and the `;` (not `&&`) guarantees the smoke test runs
+    // regardless.
+    //
+    // STEP 2 -- smoke test, roughly 60-90 s. Builds a real NES env,
+    // launches two AsyncVectorEnv workers, and round-trips a checkpoint.
+    // If this fails, the environment is broken and you want to know now,
+    // not after `python train.py` has run for an hour on black frames.
+    //
+    // NOTE: nothing here installs Python packages. Mario_OpenAI's one
+    // extra dependency is baked into Dockerfile.develop so it survives
+    // into prebuilds and is covered by that file's numpy assertion.
+    "postCreateCommand": "sudo bash -c 'curl -sSL -o /tmp/sm.deb https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb && dpkg -i /tmp/sm.deb && rm -f /tmp/sm.deb' || echo '[devcontainer] session-manager-plugin install failed (non-fatal; run it by hand before aws ssm start-session)'; python tools/smoke_test.py",
+
+    // Runs on every start/resume, including waking a stopped Codespace.
+    // Cheap (a couple of seconds) -- just re-checks the pins and imports,
+    // which is where a stale prebuild or a hand-run `pip install` shows up.
+    //
+    // session-manager-plugin is NOT reinstalled here: it survives a
+    // stop/start because it lives in the container filesystem. Only a
+    // rebuild or a brand-new Codespace re-triggers postCreateCommand.
+    "postStartCommand": "python tools/smoke_test.py verify",
+
+    "remoteUser": "vscode",
+
+    // MARIOOPS_S3_BUCKET is deliberately NOT set. Unset means the whole
+    // cloud layer (S3 + CloudWatch) is inert, so a fresh Codespace trains
+    // with zero AWS credentials and zero AWS spend. Set it in the terminal
+    // when you actually want sync:
+    //   export MARIOOPS_S3_BUCKET=my-bucket MARIOOPS_RUN_ID=my-run
+    //
+    // AWS_DEFAULT_REGION is likewise not set here. Prefer Codespaces
+    // secrets (Settings > Codespaces) for AWS_ACCESS_KEY_ID,
+    // AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION -- they arrive as env
+    // vars the CLI reads automatically, with nothing written to disk and
+    // nothing to commit by accident. OPENAI_API_KEY works the same way;
+    // see the "secrets" block above.
+    "remoteEnv": {
+        "PYTHONUNBUFFERED": "1"
+    },
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-azuretools.vscode-docker",
+                "ms-toolsai.jupyter"
+            ],
+            "settings": {
+                // Dependencies live in the image's system site-packages, not a
+                // workspace .venv (a .venv would be hidden by the bind mount --
+                // see Dockerfile.develop). Point Pylance at the interpreter that
+                // actually has gym and torch, or every import goes red.
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.terminal.activateEnvironment": false,
+                "files.exclude": {
+                    "**/__pycache__": true,
+                    "**/.smoke": true
+                }
+            }
+        }
     }
-  }
 }
