@@ -42,8 +42,18 @@ ENV_NAME = os.environ.get("MARIO_ENV_NAME", "SuperMarioBros-1-1-v0")
 #     OPENAI_MODEL=gpt-6-astra python openai_play.py
 #
 # VERIFY THIS DEFAULT before your first run -- OpenAI's model ids change
-# faster than this file will. https://developers.openai.com/api/docs/models
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6")
+# faster than this file will. The authoritative list is your own
+# account's, not the docs page:
+#
+#     python -c "from openai import OpenAI; \
+#                print([m.id for m in OpenAI().models.list()])"
+#
+# NOTE on 2026-09-08: "gpt-5.6" WORKS but does not appear in that list --
+# it is an alias for gpt-5.6-sol. The 5.6 generation enumerates as
+# gpt-5.6-sol (flagship), gpt-5.6-terra and gpt-5.6-luna, with
+# gpt-6-astra above them. The explicit id is pinned here rather than the
+# alias so that a summary.json says exactly what ran.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
 
 # "responses" (current OpenAI surface) or "chat" (chat.completions).
 # Both are implemented. If the SDK version in your image does not have
@@ -52,11 +62,30 @@ OPENAI_API_STYLE = os.environ.get("OPENAI_API_STYLE", "responses")
 
 # Reasoning effort, for models that expose it. Low by default: this is a
 # 7-way classification against a 240x256 screenshot, not a proof, and
-# every extra reasoning token is latency and money per decision.
+# every extra reasoning token is latency, money, AND output budget --
+# see OPENAI_MAX_OUTPUT_TOKENS below, which is not independent of this
+# setting the way it looks.
 # Set to "" to omit the parameter entirely for models that reject it.
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "low")
 
-OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 400))
+# 2000 looks absurd for a reply that is ~40 tokens of JSON. It is not.
+#
+# ON A REASONING MODEL, REASONING TOKENS COUNT AGAINST THIS BUDGET. If
+# the model spends the whole allowance thinking, there is nothing left
+# to emit the answer with -- and the API does NOT raise. It returns
+# success with an EMPTY output_text, which arrives here as
+#
+#     [plan] empty response -- falling back to right+B for 20 frames
+#
+# i.e. a silent degradation to a hardcoded action, billed at full price,
+# that looks like the model gave a bad answer rather than no answer.
+# This file shipped with 400 and decision 001 failed exactly this way on
+# the first real run; 2000 fixed it with no other change.
+#
+# If you raise OPENAI_REASONING_EFFORT, raise this too. If you see
+# PARSE FAILURE notes, check the "response" field in trace.jsonl before
+# blaming the prompt: EMPTY means this, malformed means the prompt.
+OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 2000))
 
 # Retries on a transient API error (429/5xx/timeout). The emulator is
 # frozen while we retry, so a retry costs wall-clock time but no game
@@ -110,6 +139,26 @@ MAX_FRAMES = int(os.environ.get("MAX_FRAMES", 9000))
 # assuming -- final_x per api_call is the number to compare:
 #
 #     MAX_FRAMES_PER_PLAN=45 MAX_SEGMENTS_PER_PLAN=2 python openai_play.py
+#
+# Left at 90 until that comparison actually says otherwise.
+#
+# THESE THREE ARE THE CENTRAL TRADE-OFF, AND 90 MAY BE TOO GENEROUS.
+# Measured 2026-09-08, 15-decision budget, gpt-5.6-sol:
+#
+#     cap 90:  3 calls, final_x 459, 153 px/call, budget exhausted
+#     cap 90:  2 calls, final_x 312, 156 px/call, DIED
+#     cap 45:  8 calls, final_x 706,  88 px/call, DIED
+#
+# Short plans got 2.3x further but are ~40% less efficient per call.
+# On the death at cap 90 the model returned an exactly-90-frame plan --
+# the clamp fired -- chaining two jumps, with the note "then LIKELY
+# first pipe". It was guessing about terrain past the screen edge. A
+# 90-frame plan is 1.5 s of blind play.
+#
+# CAVEAT: n=1 per condition and the 2-call run is barely a sample. The
+# missing experiment is long plans at a 15-decision budget:
+#
+#     MAX_DECISIONS=15 python openai_play.py
 #
 # Left at 90 until that comparison actually says otherwise.
 MAX_SEGMENTS_PER_PLAN = int(os.environ.get("MAX_SEGMENTS_PER_PLAN", 4))
