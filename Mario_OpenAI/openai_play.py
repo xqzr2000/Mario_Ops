@@ -116,6 +116,10 @@ def main() -> None:
 
     prev_x = int(info.get("x_pos", 0))
     prev_plan_str = None
+    # Frames actually EXECUTED by the last plan -- not the frames it
+    # asked for. A plan cut short by a death or a flag would otherwise
+    # report a speed averaged over frames that never ran.
+    prev_frames = 0
     stuck = 0
     done = False
     stop_reason = "decision budget exhausted"
@@ -131,6 +135,7 @@ def main() -> None:
             "y_pos": int(info.get("y_pos", 0)),
             "time": int(info.get("time", 0)),
             "prev_x": prev_x,
+            "prev_frames": prev_frames,
             "prev_plan": prev_plan_str,
             "stuck": stuck,
             "budget_left": config.MAX_DECISIONS - decision,
@@ -165,11 +170,14 @@ def main() -> None:
 
         prev_plan_str = describe_plan(plan)
 
+        frames_before = ctx["frame"]
         for action, frames in plan:
             done, info = run_segment(env, action, frames, True,
                                      frames_rgb, meta, ctx)
             if done or info.get("flag_get", False):
                 break
+        # Measured, not requested: run_segment breaks early on death.
+        prev_frames = ctx["frame"] - frames_before
 
         new_x = int(info.get("x_pos", 0))
         decision_log.append({

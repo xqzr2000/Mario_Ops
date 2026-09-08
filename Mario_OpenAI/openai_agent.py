@@ -65,7 +65,8 @@ NES PHYSICS YOU MUST ACCOUNT FOR:
 - Momentum is real and builds slowly. A running jump needs a run-up:
   hold 3 (right+B) for 20-40 frames BEFORE the jump, then use 4
   (right+A+B) for the jump itself. A standing jump from action 2 will
-  not clear a wide pit.
+  not clear a wide pit. BUT SEE THE TIMING RULE BELOW -- a 30-frame
+  run-up into an obstacle 15 frames away is a death, not a run-up.
 - You cannot change direction much in mid-air. Commit before you leave
   the ground.
 - Goombas and Koopas die if you land on them from above. Touching them
@@ -82,6 +83,26 @@ STRATEGY:
 - If the telemetry says you are stuck, whatever you did last time did
   not work. Do something different -- back up and take a longer run-up,
   or jump earlier.
+
+TIMING RULE -- DO THIS ARITHMETIC BEFORE YOU CHOOSE THE FIRST DURATION:
+The telemetry gives you Mario's current speed in PIXELS PER FRAME. The
+screen is 256 px wide and Mario sits near the left third of it, so an
+obstacle at the middle of the screen is roughly 90 px away and one at
+the right edge is roughly 170 px.
+
+    frames_until_contact  =  distance_in_pixels / speed_in_px_per_frame
+
+At a typical running speed of 3 px/frame that is 30 frames to
+mid-screen and 55 to the right edge. YOUR FIRST SEGMENT MUST BE SHORTER
+THAN frames_until_contact for the nearest hazard. If a Goomba is
+mid-screen and you are running at 3 px/frame, a 24-frame run-up puts
+the jump 6 frames before impact, which is too late to leave the ground.
+Estimate the gap, divide, then subtract a margin.
+
+This is the single most common way to lose: the plan is right and the
+first number is too big, so Mario runs into the thing he intended to
+jump over. When unsure, make the first segment SHORTER. A wasted
+decision costs one API call; a death ends the run.
 
 REPLY FORMAT -- return JSON and nothing else, no markdown fences:
 {{"note": "<max 15 words on what you see and intend>",
@@ -151,14 +172,37 @@ class OpenAIMarioAgent:
         A single frame has no velocity in it. Without prev_x the model
         cannot tell a running Mario from a Mario pressed against a wall,
         because both look identical.
+
+        SPEED IS THE LOAD-BEARING LINE. A still frame gives no scale for
+        converting "that Goomba looks close" into a frame count, and
+        getting that conversion wrong is the observed cause of death:
+        the model plans a 24-frame run-up toward an obstacle 15 frames
+        away and runs straight into it. Handing over px/frame lets it do
+        the division instead of guessing at it.
         """
+        dx = state["x_pos"] - state["prev_x"]
+        frames = state.get("prev_frames") or 0
+        if frames > 0:
+            speed = dx / frames
+            speed_line = (f"current_speed: {speed:.1f} px/frame "
+                          f"({dx} px over the last {frames} frames)")
+            # Pre-computed so the model never has to trust its own
+            # arithmetic on the two numbers that matter most.
+            if speed > 0.5:
+                speed_line += (f"\n frames_to_midscreen: ~{90 / speed:.0f} "
+                               f"| frames_to_right_edge: ~{170 / speed:.0f} "
+                               "(at this speed)")
+        else:
+            speed_line = ("current_speed: unknown (first decision; "
+                          "Mario starts stationary and takes ~30 frames "
+                          "of action 3 to reach full running speed)")
+
         lines = [
             f"decision: {state['decision']}",
             f"x_position: {state['x_pos']}",
             f"y_position: {state['y_pos']}",
             f"time_remaining: {state['time']}",
-            f"previous_x_position: {state['prev_x']}",
-            f"progress_since_last_decision: {state['x_pos'] - state['prev_x']} px",
+            speed_line,
             f"previous_plan: {state['prev_plan'] or 'none (first decision)'}",
             f"stuck_counter: {state['stuck']}",
             f"decisions_remaining: {state['budget_left']}",
