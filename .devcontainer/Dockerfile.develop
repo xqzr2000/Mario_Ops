@@ -131,12 +131,26 @@ RUN apt-get update \
 RUN pip install --no-cache-dir --upgrade \
         "pip>=24.0" setuptools wheel
 
-# FIX 2 -- pin torch's one problematic pure-Python dependency FROM PyPI,
-# while PyPI is still the active index. Belt to the suspenders above: once
-# this is satisfied, the torch line below never resolves it against
-# download.pytorch.org at all, so a future pip regressing the same way
-# cannot reach step 3. torch 2.3.1 needs >=4.8.0; 4.12.2 is inside that
-# and predates the underscore-metadata releases.
+# FIX 2 -- install torch's one problematic pure-Python dependency FROM
+# PyPI, while PyPI is still the active index. Belt to the suspenders
+# above: once this is present, the torch line below reports
+#
+#     Requirement already satisfied: typing-extensions>=4.8.0 ... (4.12.2)
+#
+# and never resolves it against download.pytorch.org at all, so a future
+# pip regressing the same way cannot reach step 3 of the chain. torch
+# 2.3.1 needs >=4.8.0; 4.12.2 is inside that and predates the
+# underscore-metadata releases.
+#
+# THIS PIN IS DELIBERATELY TRANSIENT. The openai install further down
+# requires typing-extensions>=4.14 and will uninstall 4.12.2 and put
+# 4.16.0 in its place. That is correct and expected: this line exists
+# ONLY to be already-satisfied during the torch step. Once torch is in,
+# the version is free to float, and the final image ships whatever the
+# openai SDK asked for. Do not "fix" the upgrade you see in the build
+# log, and do not add a version assertion here -- an earlier revision of
+# this file did, and it failed the build for a package that was doing
+# exactly what it was supposed to do.
 RUN pip install --no-cache-dir "typing-extensions==4.12.2"
 
 # DO NOT "fix" the above with --extra-index-url https://pypi.org/simple on
@@ -179,7 +193,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 # Written literally rather than COPY'd because the build context is
 # Mario_AWS/ and Mario_OpenAI/requirements.txt is outside it. Keep this
 # pin in sync with Mario_OpenAI/requirements.txt, which is the source of
-# truth and carries the reasoning.
+# truth and carries the reasoning. 2.54.0 is what the range resolved to
+# on 2026-09-08; hard-pinned now, per the convention every other
+# dependency in this repo follows.
 #
 # WHEN A THIRD PROJECT NEEDS EXTRAS: stop adding literal lines here.
 # Either move the context to the repo root and COPY each project's
@@ -193,7 +209,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 # distro and jiter, none of which depend on numpy. The assertion below
 # proves it rather than assuming it -- which is why this line sits ABOVE
 # the guard and not after it.
-RUN pip install --no-cache-dir "openai>=1.60,<3"
+RUN pip install --no-cache-dir "openai==2.54.0"
 
 # Fail the BUILD, not a training run three hours in, if anything above
 # dragged in numpy 2.x. nes-py is incompatible with it and dies either
@@ -204,17 +220,6 @@ RUN python -c "import numpy, sys; \
     sys.exit(0) if v == '1.26.4' else \
     (print(f'FATAL: numpy {v} installed, 1.26.4 required (nes-py breaks on 2.x)') \
      or sys.exit(1))"
-
-# Same idea for the dependency that actually broke the build. If a later
-# edit lets something upgrade typing-extensions past the pin, that is not
-# fatal on its own -- but it means FIX 2 above has stopped doing its job,
-# and you want to learn that here rather than in a build log six months
-# from now that again blames a package called flit_core.
-RUN python -c "import typing_extensions, sys; \
-    v = typing_extensions.__version__; \
-    sys.exit(0) if v == '4.12.2' else \
-    (print(f'WARNING: typing-extensions {v}, pinned 4.12.2 -- see FIX 2') \
-     or sys.exit(0))"
 
 # NO `COPY . .` HERE, ON PURPOSE. The devcontainer bind-mounts the repo
 # at runtime; baking a copy in would shadow nothing and just guarantee
