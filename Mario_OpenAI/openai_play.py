@@ -88,6 +88,59 @@ def run_segment(env, action, frames, capture, frames_rgb, meta, ctx):
     return done, info
 
 
+def land(env, frames_rgb, meta, ctx):
+    """Step until Mario is back on the ground, or the cap runs out.
+
+    Called between a finished plan and the next screenshot so that every
+    decision is made from a grounded state. See LAND_BEFORE_DECIDING in
+    config.py for why this matters more than it sounds like it should.
+
+    Grounded is detected as y_pos holding still for a few frames rather
+    than matching a fixed floor height: 1-1 has pipes, blocks and stairs,
+    so "on the ground" is not one number. Frames spent here are captured
+    and counted like any others -- they are real game time, and leaving
+    them out of prev_frames would corrupt the px/frame telemetry this
+    was built to protect.
+
+    Returns (done, info, frames_used).
+    """
+    info = ctx["info"]
+    if not config.LAND_BEFORE_DECIDING:
+        return False, info, 0
+
+    action = config.LAND_HOLD_ACTION
+    start = ctx["frame"]
+    last_y = int(info.get("y_pos", 0))
+    still = 0
+
+    for _ in range(config.LAND_MAX_FRAMES):
+        _, _, done, info = env.step(action)
+        ctx["frame"] += 1
+        if ctx["frame"] % config.CAPTURE_EVERY_N_FRAMES == 0:
+            frames_rgb.append(env.unwrapped.screen.copy())
+            meta.append({
+                "decision": ctx["decision"],
+                "x_pos": int(info.get("x_pos", 0)),
+                "time": int(info.get("time", 0)),
+                "action_name": ACTION_NAMES[action] + " (landing)",
+            })
+        if done or info.get("flag_get", False):
+            ctx["info"] = info
+            return done, info, ctx["frame"] - start
+
+        y = int(info.get("y_pos", 0))
+        # Three consecutive identical readings, not one: y_pos is
+        # momentarily flat at the apex of a jump too, and stopping there
+        # would defeat the whole point.
+        still = still + 1 if y == last_y else 0
+        last_y = y
+        if still >= 3:
+            break
+
+    ctx["info"] = info
+    return False, info, ctx["frame"] - start
+
+
 def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         sys.exit("OPENAI_API_KEY is not set. In a Codespace it should arrive "
@@ -120,6 +173,11 @@ def main() -> None:
     # asked for. A plan cut short by a death or a flag would otherwise
     # report a speed averaged over frames that never ran.
     prev_frames = 0
+    # Landing accounting, reported in summary.json: if this is a large
+    # fraction of total frames, plans are ending mid-jump more often
+    # than they should and the prompt -- not this loop -- is the fix.
+    landing_frames = 0
+    landings = 0
     stuck = 0
     done = False
     stop_reason = "decision budget exhausted"
@@ -176,7 +234,17 @@ def main() -> None:
                                      frames_rgb, meta, ctx)
             if done or info.get("flag_get", False):
                 break
-        # Measured, not requested: run_segment breaks early on death.
+
+        # Settle to the ground before the next screenshot, so the model
+        # never plans a run-up for frames Mario spends falling.
+        if not done and not info.get("flag_get", False):
+            done, info, landed_in = land(env, frames_rgb, meta, ctx)
+            if landed_in:
+                landing_frames += landed_in
+                landings += 1
+
+        # Measured, not requested: run_segment breaks early on death,
+        # and the landing frames above are real game time too.
         prev_frames = ctx["frame"] - frames_before
 
         new_x = int(info.get("x_pos", 0))
@@ -240,6 +308,9 @@ def main() -> None:
         "output_tokens": agent.output_tokens,
         "api_seconds": round(agent.api_seconds, 1),
         "nes_frames": ctx["frame"],
+        "land_before_deciding": config.LAND_BEFORE_DECIDING,
+        "landings": landings,
+        "landing_frames": landing_frames,
         "captured_frames": len(frames_rgb),
         "final_x_position": final_x,
         "flag_get": flag,

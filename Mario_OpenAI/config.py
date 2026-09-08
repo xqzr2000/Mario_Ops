@@ -191,6 +191,40 @@ MAX_SEGMENTS_PER_PLAN = int(os.environ.get("MAX_SEGMENTS_PER_PLAN", 4))
 MAX_FRAMES_PER_SEGMENT = int(os.environ.get("MAX_FRAMES_PER_SEGMENT", 60))
 MAX_FRAMES_PER_PLAN = int(os.environ.get("MAX_FRAMES_PER_PLAN", 90))
 
+# ------------------------------------------------- land before deciding
+
+# After a plan ends, keep stepping until Mario is back on the ground
+# before taking the screenshot for the next decision.
+#
+# WHY: plans routinely end mid-jump -- the model emits a jump segment
+# followed by a short tail like "right+B x5", and control returns while
+# Mario is still in the air. Three of eleven decisions in the cap-45
+# speed-telemetry run opened with the note "Airborne", and those calls
+# are close to wasted: the model plans a run-up for frames Mario spends
+# falling, `right+A+B` cannot start a jump he is already in, and the
+# px/frame telemetry is averaged over a partly-airborne plan so the
+# number it reasons from is wrong too.
+#
+# Landing first makes the model's own physics assumptions TRUE. "Hold
+# right+B for 20 frames to build speed" only means something from the
+# ground.
+#
+# Set to 0 to disable and screenshot immediately, which is what the
+# runs up to 2026-09-08 did.
+LAND_BEFORE_DECIDING = os.environ.get("LAND_BEFORE_DECIDING", "1") == "1"
+
+# Hard cap on the landing wait. A fall into a pit never lands -- the
+# death arrives first, but only after a long fall -- and a Mario stuck
+# against a wall mid-jump would otherwise spin here. 90 frames is 1.5 s,
+# far longer than any real jump (~45 frames at most).
+LAND_MAX_FRAMES = int(os.environ.get("LAND_MAX_FRAMES", 90))
+
+# Held while waiting to land. Air control is limited but not zero, so
+# holding right+B keeps horizontal momentum through the descent instead
+# of dropping it. NOOP would land Mario short of where the model's plan
+# intended him to be.
+LAND_HOLD_ACTION = int(os.environ.get("LAND_HOLD_ACTION", 3))   # right+B
+
 # ---------------------------------------------------------- behaviour
 
 # End the run when Mario dies. The alternative (let gym auto-reset and
