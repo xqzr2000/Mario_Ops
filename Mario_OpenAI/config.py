@@ -225,9 +225,17 @@ MAX_FRAMES_PER_PLAN = int(os.environ.get("MAX_FRAMES_PER_PLAN", 90))
 # right+B for 20 frames to build speed" only means something from the
 # ground.
 #
-# Set to 0 to disable and screenshot immediately, which is what the
-# runs up to 2026-09-08 did.
-LAND_BEFORE_DECIDING = os.environ.get("LAND_BEFORE_DECIDING", "1") == "1"
+# DEFAULT IS NOW OFF. Measured A/B at cap 45, three runs each:
+#     landing on  (stable=6): 696, 312, 312
+#     landing off:            312, 707, 722
+# Off is equal or better, and it does not push Mario forward outside any
+# plan. The y_pos trace (LAND_DEBUG_Y) showed ground is exactly 79 with
+# no noise, and that holding right+B during the wait started a whole
+# extra jump inside the loop -- the feature was solving a plateau
+# problem that does not exist and creating a drift problem that does.
+# Kept, off, because the diagnostic hooks are useful; do not re-enable
+# without a three-run comparison.
+LAND_BEFORE_DECIDING = os.environ.get("LAND_BEFORE_DECIDING", "0") == "1"
 
 # Hard cap on the landing wait. A fall into a pit never lands -- the
 # death arrives first, but only after a long fall -- and a Mario stuck

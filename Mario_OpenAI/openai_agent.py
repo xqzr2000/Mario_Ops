@@ -71,6 +71,15 @@ NES PHYSICS YOU MUST ACCOUNT FOR:
   the ground.
 - Goombas and Koopas die if you land on them from above. Touching them
   from the side costs a life.
+- ENEMIES WALK TOWARD YOU. A Goomba closes at ~0.6 px/frame on its own,
+  so when you are running at 3 px/frame the gap shrinks at ~3.6, not 3.
+  Every frames-to-contact number you compute for an ENEMY is ~20% too
+  generous unless you correct for this. The telemetry gives you a
+  separate enemy-adjusted figure -- use that one for Goombas.
+- Mario is only safe from a Goomba while he is ABOVE it. A jump that
+  starts too late puts him at the enemy's height on the way up; a jump
+  that starts early and is held long (25-30 frames of A) carries him
+  over with room to spare. The safe error is jumping too EARLY.
 
 STRATEGY:
 - Moving right is almost always correct. Only use 6 (left) to back up
@@ -80,6 +89,13 @@ STRATEGY:
 - Look at the ground ahead of Mario. A gap in the floor tiles or a
   green pipe is the thing you must plan a jump for. Plan the run-up and
   the jump in the SAME reply.
+- DO NOT TRY TO TIME A JUMP PRECISELY. You cannot see between
+  decisions, the screenshot is already stale by the length of your
+  plan, and enemies move while it runs. Aim to jump 10-15 frames
+  EARLIER than the arithmetic says and hold A for 25-30 frames. A
+  running jump from further out clears a Goomba by a wide margin; a
+  "perfectly timed" one has zero margin and any error is a death.
+  When a Goomba is on screen, the first segment should be SHORT.
 - If the telemetry says you are stuck, whatever you did last time did
   not work. Do something different -- back up and take a longer run-up,
   or jump earlier.
@@ -189,9 +205,21 @@ class OpenAIMarioAgent:
             # Pre-computed so the model never has to trust its own
             # arithmetic on the two numbers that matter most.
             if speed > 0.5:
-                speed_line += (f"\n frames_to_midscreen: ~{90 / speed:.0f} "
-                               f"| frames_to_right_edge: ~{170 / speed:.0f} "
-                               "(at this speed)")
+                # Two estimates: static obstacles (pipes, pits) and enemies
+                # walking toward Mario at ~0.6 px/frame. The second is the
+                # one that matters for the Goomba that has ended most runs
+                # at x=312 -- the unadjusted figure is ~20% too generous,
+                # which is exactly the margin between a jump and a death.
+                closing = speed + 0.6
+                speed_line += (
+                    f"\n frames_to_midscreen: ~{90 / speed:.0f} "
+                    f"| frames_to_right_edge: ~{170 / speed:.0f} "
+                    "(static obstacle: pipe, pit, block)"
+                    f"\n frames_to_ENEMY_at_midscreen: ~{90 / closing:.0f} "
+                    f"| at_right_edge: ~{170 / closing:.0f} "
+                    "(Goomba walking toward you -- use THIS for enemies, "
+                    "and jump 10-15 frames before it)"
+                )
         else:
             speed_line = ("current_speed: unknown (first decision; "
                           "Mario starts stationary and takes ~30 frames "
