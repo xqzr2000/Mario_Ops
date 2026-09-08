@@ -27,7 +27,7 @@ NES emulator
 
 ## Best Gameplays
 
-None of my tests has reached the flag yet. This fancy model (GPT-5.6-Sol) is 
+None of my tests has reached the flag yet. This fancy models (GPT-5.6-Sol, GPT-6-Astra) is 
 worse than my Colab trained double DQN. 
 
 GPT-5.6-Sol:
