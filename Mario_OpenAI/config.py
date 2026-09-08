@@ -43,7 +43,7 @@ ENV_NAME = os.environ.get("MARIO_ENV_NAME", "SuperMarioBros-1-1-v0")
 #
 # VERIFY THIS DEFAULT before your first run -- OpenAI's model ids change
 # faster than this file will. https://developers.openai.com/api/docs/models
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6")
 
 # "responses" (current OpenAI surface) or "chat" (chat.completions).
 # Both are implemented. If the SDK version in your image does not have
@@ -56,7 +56,7 @@ OPENAI_API_STYLE = os.environ.get("OPENAI_API_STYLE", "responses")
 # Set to "" to omit the parameter entirely for models that reject it.
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "low")
 
-OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 2000))
+OPENAI_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", 400))
 
 # Retries on a transient API error (429/5xx/timeout). The emulator is
 # frozen while we retry, so a retry costs wall-clock time but no game
@@ -98,6 +98,20 @@ MAX_FRAMES = int(os.environ.get("MAX_FRAMES", 9000))
 # segments rather than one action plus a hold, because "run right, then
 # jump" is a single intention that one action cannot express -- and jump
 # timing is where this whole experiment lives or dies.
+#
+# THESE THREE ARE THE CENTRAL TRADE-OFF, AND 90 MAY BE TOO GENEROUS.
+# Observed on run_0002: the model returned a four-segment, exactly-90
+# frame plan -- the clamp fired -- chaining two running jumps, with the
+# note "then LIKELY first pipe". It was guessing about terrain past the
+# screen edge and died at x=312. A 90-frame plan is 1.5 s of blind play.
+#
+# Fewer frames per plan means more API calls per unit distance but a
+# fresh screenshot before every jump. Worth measuring rather than
+# assuming -- final_x per api_call is the number to compare:
+#
+#     MAX_FRAMES_PER_PLAN=45 MAX_SEGMENTS_PER_PLAN=2 python openai_play.py
+#
+# Left at 90 until that comparison actually says otherwise.
 MAX_SEGMENTS_PER_PLAN = int(os.environ.get("MAX_SEGMENTS_PER_PLAN", 4))
 MAX_FRAMES_PER_SEGMENT = int(os.environ.get("MAX_FRAMES_PER_SEGMENT", 60))
 MAX_FRAMES_PER_PLAN = int(os.environ.get("MAX_FRAMES_PER_PLAN", 90))
