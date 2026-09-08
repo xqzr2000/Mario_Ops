@@ -58,6 +58,11 @@ from pathlib import Path
 # subdirectory of the repo (Mario_Ops/Mario_AWS/), and .devcontainer/
 # must live at the REPO root one level up, because that is the only
 # place Codespaces looks for it. Hence the separate WORKSPACE_ROOT.
+#
+# Dockerfile.develop lives up there too, beside devcontainer.json: it
+# builds the image EVERY project in this repo is edited inside, so it is
+# a repo-level asset. Dockerfile.deploy is the opposite -- a Mario_AWS
+# artifact bound for ECR -- and stays in PROJECT_ROOT.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_ROOT = PROJECT_ROOT.parent
 SMOKE_DIR = Path(os.getenv("SMOKE_DIR", PROJECT_ROOT / ".smoke"))
@@ -105,7 +110,8 @@ def check_verify():
         f"python {py.major}.{py.minor} -- this stack needs 3.10 or 3.11. "
         "nes-py 8.2.1 compiles a C++ extension that will not build on "
         "3.12+, and gym 0.25.2 predates it. Rebuild the dev container "
-        "(Dockerfile.develop pins 3.10, matching the deploy image).",
+        "(.devcontainer/Dockerfile.develop pins 3.10, matching the "
+        "deploy image).",
     )
 
     try:
@@ -152,6 +158,19 @@ def check_verify():
         except Exception:
             fail(f"{name} is not installed")
 
+    # openai is NOT in requirements.txt on purpose -- that file is shared
+    # with Dockerfile.deploy, and an OpenAI SDK has no business in a CUDA
+    # DQN image bound for ECR. .devcontainer/Dockerfile.develop installs
+    # it directly for Mario_OpenAI. Informational, never a failure:
+    # train.py and play.py do not import it, and this project must stay
+    # runnable with no OpenAI account at all.
+    try:
+        info(f"openai=={pkg_version('openai')} (Mario_OpenAI only; "
+             "not used by train.py or play.py)")
+    except Exception:
+        info("openai not installed -- fine unless you are running "
+             "Mario_OpenAI; .devcontainer/Dockerfile.develop installs it")
+
     try:
         import numpy as np
         import torch
@@ -181,13 +200,20 @@ def check_verify():
         "ffmpeg on PATH (play.py H.264 encode path)",
         "ffmpeg not found -- play.py would fall back to OpenCV mp4v and "
         "the clips will not play in browsers. Rebuild the dev container; "
-        "Dockerfile.develop installs it.",
+        ".devcontainer/Dockerfile.develop installs it.",
     )
 
     header("verify: repo surface and imports")
+    # Dockerfile.develop is deliberately ABSENT from this list. It used to
+    # sit beside Dockerfile.deploy and moved to .devcontainer/ when the
+    # repo grew a second project, because the dev image is a repo-level
+    # asset while the deploy image is a Mario_AWS artifact. "Does
+    # Mario_AWS contain a dev Dockerfile" stopped being a meaningful
+    # question about this project; _check_devcontainer() below asks the
+    # question that replaced it.
     expected_paths = [
         "train.py", "play.py", "config.py", "requirements.txt",
-        "Dockerfile.deploy", "Dockerfile.develop",
+        "Dockerfile.deploy",
         "mario_agent/__init__.py", "mario_agent/config.py",
         "mario_agent/dqn_model.py", "mario_agent/mario_agent.py",
         "mario_agent/data_pipeline.py", "mario_agent/vector_env.py",
@@ -312,6 +338,29 @@ def _check_devcontainer():
         warn("no devcontainer.json found at "
              f"{WORKSPACE_ROOT} -- fine if you set this environment up by "
              "hand; if you expected a dev container, it is not being used.")
+
+    # The dev image's Dockerfile, and -- more usefully -- whether a stale
+    # copy survived the move out of PROJECT_ROOT. Two copies is the
+    # nastiest outcome: the build silently uses the .devcontainer/ one
+    # (devcontainer.json points there), so an edit to the leftover looks
+    # like it did nothing, and the reason is invisible.
+    dev_dockerfile = WORKSPACE_ROOT / ".devcontainer" / "Dockerfile.develop"
+    stale_dockerfile = PROJECT_ROOT / "Dockerfile.develop"
+
+    if dev_dockerfile.is_file():
+        ok(f"dev image Dockerfile at "
+           f"{dev_dockerfile.relative_to(WORKSPACE_ROOT)}")
+    elif at_workspace:
+        # Only meaningful if a devcontainer.json is actually present --
+        # otherwise there is no dev container to have a Dockerfile for.
+        warn(f"no Dockerfile.develop at {dev_dockerfile} -- if "
+             "devcontainer.json references one, the next rebuild will "
+             "fail before any of these checks get to run.")
+
+    if stale_dockerfile.is_file() and PROJECT_ROOT != WORKSPACE_ROOT:
+        warn(f"a STALE Dockerfile.develop is still at {stale_dockerfile}. "
+             "The build uses the .devcontainer/ copy, so this one does "
+             "nothing except mislead whoever edits it next. Delete it.")
 
     # Dockerfile.develop stamps this. If we are in a Codespace and the
     # stamp is missing, the container was almost certainly built from
