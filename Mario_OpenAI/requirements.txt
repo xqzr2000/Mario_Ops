@@ -11,10 +11,16 @@
 # The openai SDK pulls httpx / pydantic / anyio / distro / jiter, none of
 # which touch numpy. The numpy 1.26.4 pin that nes-py depends on is safe.
 #
-# TODO ON FIRST INSTALL: replace the range below with the exact resolved
-# version, matching the hard-pin convention used everywhere else in this
-# repo:
-#     pip install -r requirements.txt && pip show openai | grep -i version
+# HARD-PINNED, matching the convention every other dependency in this repo
+# follows. 2.54.0 is what `openai>=1.60,<3` resolved to on the 2026-09-08
+# image build. If you bump it, bump the matching RUN line in
+# .devcontainer/Dockerfile.develop too -- the two must agree, or a
+# rebuilt Codespace and a fresh `pip install -r` give different SDKs.
+#
+# Note it pulls typing-extensions>=4.14, which upgrades the 4.12.2 that
+# Dockerfile.develop installs earlier to work around a pip metadata bug
+# during the torch install. That upgrade is expected and harmless; see
+# the FIX 2 comment in that file before "correcting" it.
 # ---------------------------------------------------------------------------
 
-openai>=1.60,<3
+openai==2.54.0
