@@ -1,0 +1,20 @@
+# ---------------------------------------------------------------------------
+# Mario_OpenAI/requirements.txt
+#
+# DELIBERATELY TINY. Everything this project needs except the OpenAI SDK
+# already exists in the dev image: numpy 1.26.4, opencv-python-headless,
+# gym 0.25.2, nes-py, gym-super-mario-bros, and ffmpeg. Those pins live
+# in Mario_AWS/requirements.txt, which is SHARED with Dockerfile.deploy
+# and must not learn about this project -- an OpenAI dependency has no
+# business in a CUDA DQN training image pushed to ECR.
+#
+# The openai SDK pulls httpx / pydantic / anyio / distro / jiter, none of
+# which touch numpy. The numpy 1.26.4 pin that nes-py depends on is safe.
+#
+# TODO ON FIRST INSTALL: replace the range below with the exact resolved
+# version, matching the hard-pin convention used everywhere else in this
+# repo:
+#     pip install -r requirements.txt && pip show openai | grep -i version
+# ---------------------------------------------------------------------------
+
+openai>=1.60,<3
