@@ -25,6 +25,19 @@ NES emulator
     └──── repeat
 ```
 
+## Best Gameplays
+
+None of my tests has reached the flag yet. This fancy model (GPT-5.6-Sol) is 
+worse than my Colab trained double DQN. 
+
+
+https://github.com/user-attachments/assets/28c32b6d-6b47-4971-ad3c-2ac57f646826
+
+
+https://github.com/user-attachments/assets/625fc5e1-e8ac-4326-933e-b3b53b0b1cb8
+
+
+
 ## Run it
 
 ```bash
