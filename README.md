@@ -78,5 +78,5 @@ Mario_Ops/
 │   └─ devcontainer.json
 ├─ Mario_AWS/
 ├─ Mario_Colab/
-└─ Mario_CoreWave/
+└─ Mario_CoreWeave/
 ```
