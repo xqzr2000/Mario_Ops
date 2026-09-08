@@ -43,7 +43,7 @@ ENV_NAME = os.environ.get("MARIO_ENV_NAME", "SuperMarioBros-1-1-v0")
 #
 # VERIFY THIS DEFAULT before your first run -- OpenAI's model ids change
 # faster than this file will. https://developers.openai.com/api/docs/models
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
 
 # "responses" (current OpenAI surface) or "chat" (chat.completions).
 # Both are implemented. If the SDK version in your image does not have
