@@ -30,7 +30,7 @@ Choose one of the following options depending on how you want to run the project
 
 ### 1. Run `Mario_Colab.ipynb` in Google Colab
 
-- [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/xqzr2000/Mario_Ops/blob/mainColab.ipynb)
+- [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/xqzr2000/Mario_Ops/mainColab.ipynb)
 - Go with the flow (*just follow the steps in the notebook*).
 
 ### 2. Test Training in GitHub Codespaces
