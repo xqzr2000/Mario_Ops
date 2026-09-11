@@ -1,50 +1,45 @@
 # Mario_Ops
 
-*Russell's favourite project； this is my gold mine, 心头好，so many first-times with this project.*
+*Russell's favourite, 心头好，so many first-times with this project.*
 
-A containerized, cloud-native MLOps pipeline that trains a Double DQN agent to play **Super Mario Bros.**.
+**One Mario game, played by multiple AI approaches. Everything in the cloud.**
 
-**A single codebase supports multiple deployment environments**: CPU in a GitHub Codespace for development, and GPU on AWS, Google Colab, or CoreWeave for training, with the deployment target selected entirely through environment variables.
+`Mario_Ops` is a cloud-native playground for experimenting with different ways of making an AI play **Super Mario Bros. 1-1**.
 
-**Parallel build:** Training runs multiple NES emulators (set with `N_ENVS`) in separate worker processes and overlaps CPU emulation with GPU learning.
+The project started as a Double DQN reinforcement-learning experiment and has grown into a repository for comparing different approaches to a same problem:
+
+- Train a Double DQN entirely in **Google Colab**.
+- Train a Double DQN entirely in **GitHub Codespaces**.
+- Train a Double DQN using **parallel simulation environments** (upto 64) on **AWS** infrastructure.
+- Or, skip training entirely and use a general-purpose **OpenAI vision model** to play directly from screenshots.
+
+This project takes a simple approach:
+
+> Fork this repo, (give it a Star), and let AI play Mario in your preferred cloud.
+
+- No local GPU, Python installation, or Docker setup is required.
+- Click one button, and everything is ready in your browser.
 
 ---
 
-## All in the cloud!
+## Quick Start
 
-You do not need a GPU, an AWS account, Docker, or even a local Python installation to run this project. Simply fork or clone this repository, open a Codespace, and start training with a single command: `python train.py`.
+Choose one of the following options depending on how you want to run the project.
 
----
+### 1. Run `Mario_Colab.ipynb` in Google Colab
 
-## Quickstart: train in a GitHub Codespace
+- [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/xqzr2000/Mario_Ops/blob/mainColab.ipynb)
+- Go with the flow (*just follow the steps in the notebook*).
 
-**Click the green `Code` button → `Codespaces` tab → `Create codespace on main`.**
+### 2. Test Training in GitHub Codespaces
 
-Thanks to the convenience of `.devcontainer/devcontainer.json`, the Codespace automatically builds the development environment from `Dockerfile.develop` (Python 3.10, CPU-only PyTorch, FFmpeg, and all pinned dependencies) when it starts.
-
-From there, run `tools/smoke_test.py` to verify that the environment is ready.
+- Fork this repo → Click the green `Code` button → `Codespaces` tab → `Create codespace on main`.
+- Paste the following into your Codespace terminal to run a short test training session:
 
 ```bash
-# Re-run the environment checks yourself at any time
-python tools/smoke_test.py
+# 20-episode test run
+# takes about 5 minutes to complete
 
-```
-
-When the terminal displays `all checks passed`, you know the environment has been verified end to end, including:
-
-* a real NES environment,
-* two `AsyncVectorEnv` workers, and
-* a checkpoint save/load round-trip.
-
-*Side note: I'm especially proud of this part. It brings back memories of how much effort it took to get the environment working at the beginning of this project!*
-
----
-
-**You are now ready to train Mario!**
-
-Paste the following into your Codespace terminal to run a short test training session:
-
-```bash
 N_ENVS=2 \
 NUM_EPISODES=20 \
 BURNIN=5 \
@@ -54,29 +49,63 @@ EVAL_EPISODES=5 \
 python train.py
 ```
 
-This 20-episode test run will take approximately **5 minutes** on a **4-vCPU GitHub Codespace**.
+### 3. Train on AWS, using an EC2 instance with 64 vCPUs
 
-When the test run completes, two new folders will appear inside `Mario_AWS/`:
+- Start GitHub Codespaces normally, the AWS CLI environment is already built in.
+- Follow the steps in this [README](https://github.com/xqzr2000/Mario_Ops/blob/main/Mario_AWS/README.md) (*I’m still working on making this README foolproof, but everything is ready to go.*)
 
-```text
-Mario_AWS/
-├─ checkpoints_7_action_g99/
-│  ├─ lineage.json
-│  ├─ training_state.json
-│  └─ mario_net_7_action.chkpt
-├─ logs/
-│  └─ training_7_action_g99.csv
-```
+
+### 4. Let OpenAI Play Mario
+
+- Start GitHub Codespaces normally, `Mario_Ops.code-workspace` will take care of you.
+- Follow the steps in this [README](https://github.com/xqzr2000/Mario_Ops/blob/main/Mario_OpenAI/README.md) (*I’m still working on making this README foolproof, but everything is ready to go.*)
+
+
+*The `.devcontainer/devcontainer.json` file automatically builds and configures the entire development environment, including AWS CLI, based on `Dockerfile.develop`.* 
+
+*Codespace opens in `Mario_AWS` by default, making it easy to run a quick training test. The `Mario_Ops.code-workspace` file provides a VS Code multi-root workspace, making it easy to switch between the `Mario_AWS` and `Mario_OpenAI` projects.*
 
 ---
 
-## Repo layout
+## One Mario, Multiple Intelligences
 
 ```text
 Mario_Ops/
-├─ .devcontainer/
-│   └─ devcontainer.json
-├─ Mario_AWS/
-├─ Mario_Colab/
-└─ Mario_CoreWeave/
+│
+├── .devcontainer/
+│   ├── devcontainer.json
+│   └── Dockerfile.develop
+│
+├── Mario_AWS/
+│   ├── cloud/
+│   ├── mario_agent/
+│   ├── tools/
+│   ├── Dockerfile.deploy
+│   ├── config.py
+│   ├── play.py
+│   ├── README.md
+│   ├── requirements.txt
+│   └── train.py
+│
+├── Mario_Colab/
+│   ├── Mario_Colab.ipynb
+│   └── mario_net_best.chkpt.zip
+│
+├── Mario_OpenAI/
+│   ├── tools/
+│   ├── .env.example
+│   ├── config.py
+│   ├── openai_agent.py
+│   ├── openai_play.py
+│   ├── README.md
+│   ├── requirements.txt
+│   └── video_utils.py
+│
+├── Mario_CoreWeave/ (developing a neocloud approach)
+│
+├── Mario_Ops.code-workspace
+├── .gitignore
+└── README.md
 ```
+
+---
