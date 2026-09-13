@@ -4,7 +4,7 @@
 
 ---
 
-**One Mario game, played by multiple AI approaches. Everything in the cloud.**
+## One Mario game, played by multiple AI approaches. Everything in the cloud.
 
 `Mario_Ops` is a cloud-native playground for experimenting with different ways of making an AI play **Super Mario Bros. 1-1**.
 
