@@ -71,6 +71,10 @@ python train.py
 
 ## One Mario, Multiple Intelligences
 
+
+https://github.com/user-attachments/assets/e7f3d31f-e5ba-4efe-8907-3ec280b51ac4
+
+
 ```text
 Mario_Ops/
 │
