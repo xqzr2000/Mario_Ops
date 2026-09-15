@@ -1,44 +1,18 @@
+"""Mario_OpenAI v2 entry point.
+
+NES -> temporal RGB observations -> GPT-6 Astra -> short structured controller
+plan -> adaptive execution -> MP4 + trace + summary.
+
+The environment intentionally remains raw gym 0.25.2 / nes-py. One env.step()
+is one NES frame; no SkipFrame wrapper is used for the policy.
 """
-Mario_OpenAI -- entry point.
 
-    cd Mario_OpenAI && python openai_play.py
-
-NES -> screenshot -> OpenAI vision -> action plan -> NES -> run.mp4.
-
-No Torch, no checkpoint, no S3, no CloudWatch. The point of this project
-is to answer one question -- can a general vision model play a level it
-has never seen, with no training -- against the same level, the same
-7-action space, and the same video output format as the DQN agent, so
-the two are directly comparable.
-
-THE ENV IS RAW ON PURPOSE
--------------------------
-Mario_AWS wraps the env in grayscale + resize + FrameStack + SkipFrame,
-which produces a (4, 84, 84) tensor. That is exactly the wrong input
-here: the whole premise is that the model reads the real screen. So this
-builds gym_super_mario_bros + JoypadSpace and stops. One consequence
-follows and it is the easiest thing in this project to get wrong:
-
-    WITHOUT SkipFrame, ONE env.step() IS ONE NES FRAME.
-
-Mario_AWS captures one frame per agent step and encodes at 15 FPS
-because each of its steps is 4 emulated frames. Here we capture every
-4th frame explicitly (config.CAPTURE_EVERY_N_FRAMES) so that 15 FPS
-still plays back at authentic speed.
-
-GYM 0.25.2 API
---------------
-This repo pins gym==0.25.2, which is pre-Gymnasium:
-
-    state = env.reset()                       # obs only, NOT (obs, info)
-    state, reward, done, info = env.step(a)   # 4-tuple, NOT 5
-
-Code written against modern Gymnasium will fail here. Do not "fix" it.
-"""
+from __future__ import annotations
 
 import json
 import os
 import sys
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -46,64 +20,80 @@ import gym
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 
-# gym reinstates its own DeprecationWarning filter at import time, so
-# PYTHONWARNINGS cannot silence it -- gate at gym's level instead.
 gym.logger.set_level(gym.logger.ERROR)
 
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT  # noqa: E402
 
-import config                                             # noqa: E402
+import config  # noqa: E402
 from openai_agent import ACTION_NAMES, OpenAIMarioAgent, describe_plan  # noqa: E402
-from video_utils import encode_video, next_run_dir, write_highlights    # noqa: E402
+from video_utils import encode_video, next_run_dir, write_highlights  # noqa: E402
+
+
+class TemporalObservationBuffer:
+    """Sparse rolling history of raw RGB screens with exact NES frame numbers."""
+
+    def __init__(self) -> None:
+        self.samples: deque[tuple[int, object]] = deque(maxlen=config.TEMPORAL_FRAMES)
+
+    def clear(self) -> None:
+        self.samples.clear()
+
+    def record(self, frame_no: int, screen_rgb, force: bool = False) -> None:
+        if not self.samples:
+            self.samples.append((frame_no, screen_rgb.copy()))
+            return
+
+        last_frame = self.samples[-1][0]
+        if frame_no == last_frame:
+            if force:
+                self.samples[-1] = (frame_no, screen_rgb.copy())
+            return
+
+        if force or frame_no - last_frame >= config.TEMPORAL_SAMPLE_EVERY_N_FRAMES:
+            self.samples.append((frame_no, screen_rgb.copy()))
+
+    def packet(self, current_frame: int, current_screen) -> list[tuple[int, object]]:
+        self.record(current_frame, current_screen, force=True)
+        return list(self.samples)
 
 
 def build_raw_env():
-    """The 7-action NES env and nothing else."""
     env = gym_super_mario_bros.make(config.ENV_NAME, disable_env_checker=True)
-    env = JoypadSpace(env, SIMPLE_MOVEMENT)
-    return env
+    return JoypadSpace(env, SIMPLE_MOVEMENT)
 
 
-def run_segment(env, action, frames, capture, frames_rgb, meta, ctx):
-    """Execute one (action, frames) segment, capturing as we go.
+def after_step(env, action, frames_rgb, meta, ctx, label_suffix=""):
+    """Common accounting after each real NES frame."""
+    ctx["observer"].record(ctx["frame"], env.unwrapped.screen)
 
-    Returns (done, info). `ctx` carries the counters the overlay needs.
-    """
+    if ctx["frame"] % config.CAPTURE_EVERY_N_FRAMES == 0:
+        frames_rgb.append(env.unwrapped.screen.copy())
+        info = ctx["info"]
+        meta.append(
+            {
+                "decision": ctx["decision"],
+                "x_pos": int(info.get("x_pos", 0)),
+                "time": int(info.get("time", 0)),
+                "action_name": ACTION_NAMES[action] + label_suffix,
+            }
+        )
+
+
+def run_segment(env, action, frames, frames_rgb, meta, ctx):
     info = ctx["info"]
     done = False
     for _ in range(frames):
         _, _, done, info = env.step(action)
         ctx["frame"] += 1
-        if capture and ctx["frame"] % config.CAPTURE_EVERY_N_FRAMES == 0:
-            frames_rgb.append(env.unwrapped.screen.copy())
-            meta.append({
-                "decision": ctx["decision"],
-                "x_pos": int(info.get("x_pos", 0)),
-                "time": int(info.get("time", 0)),
-                "action_name": ACTION_NAMES[action],
-            })
-        if done or info.get("flag_get", False):
+        ctx["info"] = info
+        after_step(env, action, frames_rgb, meta, ctx)
+        if done or info.get("flag_get", False) or ctx["frame"] >= config.MAX_FRAMES:
             break
-    ctx["info"] = info
     return done, info
 
 
 def land(env, frames_rgb, meta, ctx):
-    """Step until Mario is back on the ground, or the cap runs out.
-
-    Called between a finished plan and the next screenshot so that every
-    decision is made from a grounded state. See LAND_BEFORE_DECIDING in
-    config.py for why this matters more than it sounds like it should.
-
-    Grounded is detected as y_pos holding still for a few frames rather
-    than matching a fixed floor height: 1-1 has pipes, blocks and stairs,
-    so "on the ground" is not one number. Frames spent here are captured
-    and counted like any others -- they are real game time, and leaving
-    them out of prev_frames would corrupt the px/frame telemetry this
-    was built to protect.
-
-    Returns (done, info, frames_used, y_samples).
-    """
+    """Optional v1-compatible landing wait; disabled by default."""
     info = ctx["info"]
     if not config.LAND_BEFORE_DECIDING:
         return False, info, 0, []
@@ -117,83 +107,69 @@ def land(env, frames_rgb, meta, ctx):
     for _ in range(config.LAND_MAX_FRAMES):
         _, _, done, info = env.step(action)
         ctx["frame"] += 1
-        if ctx["frame"] % config.CAPTURE_EVERY_N_FRAMES == 0:
-            frames_rgb.append(env.unwrapped.screen.copy())
-            meta.append({
-                "decision": ctx["decision"],
-                "x_pos": int(info.get("x_pos", 0)),
-                "time": int(info.get("time", 0)),
-                "action_name": ACTION_NAMES[action] + " (landing)",
-            })
-        if done or info.get("flag_get", False):
-            ctx["info"] = info
+        ctx["info"] = info
+        after_step(env, action, frames_rgb, meta, ctx, " (landing)")
+
+        if done or info.get("flag_get", False) or ctx["frame"] >= config.MAX_FRAMES:
             return done, info, ctx["frame"] - start, samples
 
         y = int(info.get("y_pos", 0))
         samples.append(y)
-        # Consecutive identical readings, not one: y_pos is momentarily
-        # flat at the apex of a jump and plausibly mid-descent too, so a
-        # short window exits while Mario is still airborne. See
-        # LAND_STABLE_FRAMES -- the first default (3) was too weak and
-        # made this loop an expensive no-op.
         still = still + 1 if y == last_y else 0
         last_y = y
         if still >= config.LAND_STABLE_FRAMES:
             break
 
-    ctx["info"] = info
     return False, info, ctx["frame"] - start, samples
 
 
 def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
-        sys.exit("OPENAI_API_KEY is not set. In a Codespace it should arrive "
-                 "as a Codespaces secret; locally, put it in a .env you do "
-                 "not commit (see .env.example).")
+        sys.exit(
+            "OPENAI_API_KEY is not set. Add it as a Codespaces secret or local "
+            "environment variable; do not commit it."
+        )
 
     agent = OpenAIMarioAgent()
     env = build_raw_env()
+    observer = TemporalObservationBuffer()
 
-    print(f"[openai] model: {agent.model} (api style: {config.OPENAI_API_STYLE})")
+    print(f"[openai] model: {agent.model} (Responses API / Structured Outputs)")
     print(f"[openai] starting {config.ENV_NAME}")
-    print(f"[openai] budget: {config.MAX_DECISIONS} decisions, "
-          f"{config.MAX_FRAMES} frames\n")
+    print(
+        f"[openai] temporal vision: {config.TEMPORAL_FRAMES} frames, "
+        f"sample every {config.TEMPORAL_SAMPLE_EVERY_N_FRAMES} NES frames"
+    )
+    print(
+        f"[openai] budget: {config.MAX_DECISIONS} decisions, "
+        f"{config.MAX_FRAMES} NES frames\n"
+    )
 
     env.reset()
-
-    # reset() returns only the observation on gym 0.25, so there is no
-    # info dict and therefore no x_pos for the first prompt. One NOOP
-    # frame is the cheapest way to get one.
-    _, _, _, info = env.step(0)
+    _, _, _, info = env.step(0)  # gym 0.25 reset has no info dict
 
     frames_rgb, meta = [], []
-    ctx = {"frame": 1, "decision": 0, "info": info}
+    ctx = {"frame": 1, "decision": 0, "info": info, "observer": observer}
+    observer.record(1, env.unwrapped.screen, force=True)
+
     trace = []
     decision_log = []
-
     prev_x = int(info.get("x_pos", 0))
     prev_plan_str = None
-    # Frames actually EXECUTED by the last plan -- not the frames it
-    # asked for. A plan cut short by a death or a flag would otherwise
-    # report a speed averaged over frames that never ran.
     prev_frames = 0
-    # Landing accounting, reported in summary.json: if this is a large
-    # fraction of total frames, plans are ending mid-jump more often
-    # than they should and the prompt -- not this loop -- is the fix.
     landing_frames = 0
     landings = 0
     land_y_samples = []
     stuck = 0
-    done = False
     stop_reason = "decision budget exhausted"
 
     for decision in range(1, config.MAX_DECISIONS + 1):
         ctx["decision"] = decision
         info = ctx["info"]
         x_pos = int(info.get("x_pos", 0))
-
         state = {
             "decision": decision,
+            "frame": ctx["frame"],
             "x_pos": x_pos,
             "y_pos": int(info.get("y_pos", 0)),
             "time": int(info.get("time", 0)),
@@ -204,81 +180,129 @@ def main() -> None:
             "budget_left": config.MAX_DECISIONS - decision,
         }
 
-        print(f"decision {decision:03d} | x={x_pos} t={state['time']} "
-              f"stuck={stuck}", flush=True)
+        print(
+            f"decision {decision:03d} | x={x_pos} y={state['y_pos']} "
+            f"t={state['time']} stuck={stuck}",
+            flush=True,
+        )
 
-        # Scripted unstick. A screenshot of a pipe looks the same every
-        # time, so a model that failed to clear it will usually answer
-        # the same way again -- and charge us for the privilege. Back up
-        # for a run-up, then a full running jump.
+        observation_packet = observer.packet(ctx["frame"], env.unwrapped.screen)
+        observation_frames = [frame_no for frame_no, _ in observation_packet]
+
         if stuck >= config.STUCK_FALLBACK_AFTER:
-            plan = [(6, 16), (3, 30), (4, 28)]
+            proposed_plan = [(6, 16), (3, 30), (4, 28)]
+            plan = proposed_plan
             note = "SCRIPTED UNSTICK (no API call)"
+            scene = {
+                "airborne": False,
+                "hazard_type": "unknown",
+                "hazard_distance": "near",
+                "risk": "high",
+            }
+            confidence = None
+            requested_horizon = sum(frames for _, frames in plan)
+            effective_horizon = requested_horizon
             raw = None
+            response_id = None
+            telemetry = None
             print(f"  {note}: {describe_plan(plan)}")
             stuck = 0
         else:
-            result = agent.decide(env.unwrapped.screen.copy(), state)
-            plan, note, raw = result["plan"], result["note"], result["raw"]
+            result = agent.decide(observation_packet, state)
+            plan = result["plan"]
+            proposed_plan = result["proposed_plan"]
+            note = result["note"]
+            scene = result["scene"]
+            confidence = result["confidence"]
+            requested_horizon = result["requested_reobserve_after"]
+            effective_horizon = result["effective_reobserve_after"]
+            raw = result["raw"]
+            response_id = result["response_id"]
+            telemetry = result["telemetry"]
+
             print(f"  model -> {describe_plan(plan)}")
+            if proposed_plan != plan:
+                print(
+                    f"  interrupted prefix of: {describe_plan(proposed_plan)} "
+                    f"(horizon {effective_horizon}f)"
+                )
+            print(
+                f"  scene: risk={scene['risk']} hazard={scene['hazard_type']}/"
+                f"{scene['hazard_distance']} airborne={scene['airborne']} "
+                f"confidence={confidence:.2f}"
+            )
             if note:
                 print(f"  note: {note}")
+
             if config.SAVE_TRACE:
-                trace.append({
-                    "decision": decision,
-                    "telemetry": result["telemetry"],
-                    "response": raw,
-                    "plan": plan,
-                })
+                trace.append(
+                    {
+                        "decision": decision,
+                        "observation_frames": observation_frames,
+                        "telemetry": telemetry,
+                        "response_id": response_id,
+                        "response": raw,
+                        "scene": scene,
+                        "confidence": confidence,
+                        "requested_reobserve_after": requested_horizon,
+                        "effective_reobserve_after": effective_horizon,
+                        "proposed_plan": proposed_plan,
+                        "executed_plan": plan,
+                    }
+                )
 
         prev_plan_str = describe_plan(plan)
-
         frames_before = ctx["frame"]
+        done = False
+
         for action, frames in plan:
-            done, info = run_segment(env, action, frames, True,
-                                     frames_rgb, meta, ctx)
-            if done or info.get("flag_get", False):
+            done, info = run_segment(env, action, frames, frames_rgb, meta, ctx)
+            if done or info.get("flag_get", False) or ctx["frame"] >= config.MAX_FRAMES:
                 break
 
-        # Settle to the ground before the next screenshot, so the model
-        # never plans a run-up for frames Mario spends falling.
-        if not done and not info.get("flag_get", False):
-            done, info, landed_in, y_samples = land(env, frames_rgb,
-                                                    meta, ctx)
+        if not done and not info.get("flag_get", False) and ctx["frame"] < config.MAX_FRAMES:
+            done, info, landed_in, y_samples = land(env, frames_rgb, meta, ctx)
             if landed_in:
                 landing_frames += landed_in
                 landings += 1
                 if config.LAND_DEBUG_Y:
-                    land_y_samples.append(
-                        {"decision": decision, "y": y_samples})
+                    land_y_samples.append({"decision": decision, "y": y_samples})
 
-        # Measured, not requested: run_segment breaks early on death,
-        # and the landing frames above are real game time too.
         prev_frames = ctx["frame"] - frames_before
-
         new_x = int(info.get("x_pos", 0))
-        decision_log.append({
-            "decision": decision,
-            "x_before": x_pos,
-            "x_after": new_x,
-            "plan": [{"action": a, "action_name": ACTION_NAMES[a], "frames": f}
-                     for a, f in plan],
-            "note": note,
-        })
 
-        # Stuck is measured per DECISION, not per frame: a plan that
-        # ends with Mario 3 px further along did not work, however busy
-        # it looked while it ran.
-        if new_x - x_pos < config.STUCK_MIN_DX:
-            stuck += 1
-        else:
-            stuck = 0
+        decision_log.append(
+            {
+                "decision": decision,
+                "x_before": x_pos,
+                "x_after": new_x,
+                "dx": new_x - x_pos,
+                "observation_frames": observation_frames,
+                "scene": scene,
+                "confidence": confidence,
+                "requested_reobserve_after": requested_horizon,
+                "effective_reobserve_after": effective_horizon,
+                "proposed_plan": [
+                    {"action": a, "action_name": ACTION_NAMES[a], "frames": f}
+                    for a, f in proposed_plan
+                ],
+                "executed_plan": [
+                    {"action": a, "action_name": ACTION_NAMES[a], "frames": f}
+                    for a, f in plan
+                ],
+                "frames_executed": prev_frames,
+                "note": note,
+            }
+        )
+
+        stuck = stuck + 1 if new_x - x_pos < config.STUCK_MIN_DX else 0
         prev_x = x_pos
 
         if info.get("flag_get", False):
             stop_reason = "flag reached"
             print("\n*** FLAG GET ***")
             break
+
         if done:
             stop_reason = "died" if not info.get("flag_get") else "level complete"
             print(f"\n[openai] episode ended ({stop_reason}) at x={new_x}")
@@ -286,7 +310,15 @@ def main() -> None:
                 break
             env.reset()
             _, _, _, info = env.step(0)
+            ctx["frame"] += 1
             ctx["info"] = info
+            observer.clear()
+            observer.record(ctx["frame"], env.unwrapped.screen, force=True)
+            prev_x = int(info.get("x_pos", 0))
+            prev_frames = 0
+            prev_plan_str = None
+            stuck = 0
+
         if ctx["frame"] >= config.MAX_FRAMES:
             stop_reason = "frame budget exhausted"
             break
@@ -295,33 +327,42 @@ def main() -> None:
     final_x = int(final_info.get("x_pos", 0))
     flag = bool(final_info.get("flag_get", False))
 
-    # ------------------------------------------------------- output
-
     run_dir = next_run_dir(Path(config.RUNS_DIR))
     encode_video(frames_rgb, run_dir / "run.mp4", fps=config.VIDEO_FPS)
-    write_highlights(frames_rgb, meta, run_dir / "frames",
-                     every_n=config.SAVE_EVERY_N_FRAMES)
+    write_highlights(
+        frames_rgb,
+        meta,
+        run_dir / "frames",
+        every_n=config.SAVE_EVERY_N_FRAMES,
+    )
 
     summary = {
+        "harness_version": 2,
         "run_dir": str(run_dir),
         "env": config.ENV_NAME,
         "model": agent.model,
-        "api_style": config.OPENAI_API_STYLE,
+        "api_style": "responses",
+        "structured_outputs": True,
         "reasoning_effort": config.OPENAI_REASONING_EFFORT or None,
         "screen_upscale": config.SCREEN_UPSCALE,
         "image_detail": config.IMAGE_DETAIL,
+        "temporal_frames": config.TEMPORAL_FRAMES,
+        "temporal_sample_every_n_frames": config.TEMPORAL_SAMPLE_EVERY_N_FRAMES,
+        "stateful_turns": config.STATEFUL_TURNS,
         "decisions": len(decision_log),
         "api_calls": agent.api_calls,
         "failed_calls": agent.failed_calls,
         "input_tokens": agent.input_tokens,
+        "cached_input_tokens": agent.cached_input_tokens,
+        "cache_write_tokens": agent.cache_write_tokens,
         "output_tokens": agent.output_tokens,
-        "api_seconds": round(agent.api_seconds, 1),
+        "reasoning_tokens": agent.reasoning_tokens,
+        "estimated_cost_usd": round(agent.estimated_cost_usd, 6),
+        "api_seconds": round(agent.api_seconds, 2),
         "nes_frames": ctx["frame"],
         "land_before_deciding": config.LAND_BEFORE_DECIDING,
         "landings": landings,
         "landing_frames": landing_frames,
-        "land_stable_frames": config.LAND_STABLE_FRAMES,
-        "land_hold_action": config.LAND_HOLD_ACTION,
         "land_y_samples": land_y_samples,
         "captured_frames": len(frames_rgb),
         "final_x_position": final_x,
@@ -329,24 +370,28 @@ def main() -> None:
         "stop_reason": stop_reason,
         "video_fps": config.VIDEO_FPS,
         "capture_every_n_frames": config.CAPTURE_EVERY_N_FRAMES,
-        "save_every_n_frames": config.SAVE_EVERY_N_FRAMES,
         "decision_log": decision_log,
         "created_at": datetime.now().isoformat(),
     }
-    with open(run_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=4)
+
+    with open(run_dir / "summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
     print(f"Summary saved to: {run_dir / 'summary.json'}")
 
     if config.SAVE_TRACE and trace:
-        with open(run_dir / "trace.jsonl", "w") as f:
+        with open(run_dir / "trace.jsonl", "w", encoding="utf-8") as f:
             for row in trace:
                 f.write(json.dumps(row) + "\n")
         print(f"Trace saved to: {run_dir / 'trace.jsonl'}")
 
     print(f"\nflag_get: {flag}")
     print(f"final_x: {final_x}")
-    print(f"api_calls: {agent.api_calls} "
-          f"({agent.input_tokens} in / {agent.output_tokens} out tokens)")
+    print(
+        f"api_calls: {agent.api_calls} "
+        f"({agent.input_tokens} in / {agent.output_tokens} out; "
+        f"{agent.cached_input_tokens} cached)"
+    )
+    print(f"estimated_cost_usd: ${agent.estimated_cost_usd:.4f}")
     print(f"stopped because: {stop_reason}")
 
     env.close()
